@@ -9,6 +9,10 @@ function Write-Success { Write-Host "[SUCCESS] $args" -ForegroundColor Green }
 function Write-Warning { Write-Host "[WARNING] $args" -ForegroundColor Yellow }
 function Write-Error-Custom { Write-Host "[ERROR] $args" -ForegroundColor Red }
 
+# 版本
+$VERSION = "v1.0.0"
+$RELEASE_URL = "https://github.com/qiannj/bridge-server/archive/refs/tags/$VERSION.tar.gz"
+
 # 检测管理员权限
 function Test-Administrator {
     $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -55,17 +59,29 @@ function Get-BridgeCode {
     Write-Info "下载 Bridge Server..."
     
     # 从 GitHub 下载最新版本
-    $releaseUrl = "https://github.com/qiannj/bridge-server/archive/refs/tags/v1.0.0.tar.gz"
-    $tempFile = "$env:TEMP\bridge-server.tar.gz"
+    $tempFile = "$env:TEMP\bridge-server-$VERSION.tar.gz"
     
-    Invoke-WebRequest -Uri $releaseUrl -OutFile $tempFile
+    Invoke-WebRequest -Uri $RELEASE_URL -OutFile $tempFile
     
-    # 使用 tar 解压（Windows 10+ 自带 tar 命令）
-    tar -xzf $tempFile -C "$installDir\.." --strip-components=1
+    # 使用 tar 解压到临时目录
+    $tempExtractDir = "$env:TEMP\bridge-server-extract"
+    if (Test-Path $tempExtractDir) {
+        Remove-Item -Path $tempExtractDir -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $tempExtractDir -Force | Out-Null
+    
+    # 解压（会创建 bridge-server-1.0.0 子目录）
+    tar -xzf $tempFile -C $tempExtractDir
+    
+    # 复制内容到安装目录
+    Get-ChildItem -Path "$tempExtractDir\bridge-server-1.0.0" | Copy-Item -Destination $installDir -Recurse -Force
     
     # 清理临时文件
     if (Test-Path $tempFile) {
         Remove-Item -Path $tempFile -Force
+    }
+    if (Test-Path $tempExtractDir) {
+        Remove-Item -Path $tempExtractDir -Recurse -Force
     }
     
     Write-Success "代码下载完成：$installDir"
@@ -86,28 +102,44 @@ function Install-BridgeDependencies {
     param($installDir)
     
     Write-Info "安装 Python 依赖..."
-    & "$installDir\venv\Scripts\pip.exe" install --upgrade pip
-    & "$installDir\venv\Scripts\pip.exe" install -r "$installDir\requirements.txt"
+    
+    # 检查 requirements.txt 是否存在
+    if (!(Test-Path "$installDir\requirements.txt")) {
+        Write-Error-Custom "找不到 requirements.txt，请检查下载是否完整"
+        exit 1
+    }
+    
+    & "$installDir\venv\Scripts\python.exe" -m pip install --upgrade pip
+    & "$installDir\venv\Scripts\python.exe" -m pip install -r "$installDir\requirements.txt"
     Write-Success "依赖安装完成"
 }
 
 # 创建配置文件
 function New-BridgeConfig {
+    param($installDir)
+    
     Write-Info "创建配置文件..."
     $configDir = "$env:USERPROFILE\.bridge-server"
-    $installDir = "$env:USERPROFILE\.local\opt\bridge-server"
     
     if (!(Test-Path "$configDir\config.yaml")) {
-        Copy-Item "$installDir\config.yaml.example" "$configDir\config.yaml"
-        Write-Success "配置文件已创建：$configDir\config.yaml"
+        if (Test-Path "$installDir\config.yaml.example") {
+            Copy-Item "$installDir\config.yaml.example" "$configDir\config.yaml"
+            Write-Success "配置文件已创建：$configDir\config.yaml"
+        } else {
+            Write-Warning "config.yaml.example 不存在，跳过"
+        }
     } else {
         Write-Warning "配置文件已存在，跳过"
     }
     
     if (!(Test-Path "$configDir\.env")) {
-        Copy-Item "$installDir\.env.example" "$configDir\.env"
-        Write-Success ".env 文件已创建：$configDir\.env"
-        Write-Warning "请编辑 $configDir\.env，填入你的 API Key"
+        if (Test-Path "$installDir\.env.example") {
+            Copy-Item "$installDir\.env.example" "$configDir\.env"
+            Write-Success ".env 文件已创建：$configDir\.env"
+            Write-Warning "请编辑 $configDir\.env，填入你的 API Key"
+        } else {
+            Write-Warning ".env.example 不存在，跳过"
+        }
     } else {
         Write-Warning ".env 文件已存在，跳过"
     }
@@ -182,7 +214,7 @@ function Main {
     Get-BridgeCode -installDir $installDir
     New-BridgeVenv -installDir $installDir
     Install-BridgeDependencies -installDir $installDir
-    New-BridgeConfig
+    New-BridgeConfig -installDir $installDir
     Install-BridgeCLI -installDir $installDir
     Show-CompletionMessage
 }
