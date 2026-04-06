@@ -24,6 +24,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Windows 兼容性：确保 input() 正常工作
+if sys.platform == 'win32':
+    # 在 Windows 上强制使用控制台输入
+    try:
+        import msvcrt
+    except ImportError:
+        pass
+
 
 class Colors:
     """终端颜色"""
@@ -85,6 +93,48 @@ class SetupWizard:
             print(f"\n{Colors.RED}❌ 错误：{e}{Colors.ENDC}")
             logger.exception("配置向导异常")
             sys.exit(1)
+    
+    def run_quick(self):
+        """快速配置模式（非交互）"""
+        print("\n🚀 快速配置模式\n")
+        
+        # 默认使用通义千问 qwen-plus
+        self.selected_region = 'CN'
+        self.selected_provider = self.providers.get('dashscope')
+        
+        if not self.selected_provider:
+            print(f"{Colors.RED}错误：无法加载提供商配置{Colors.ENDC}")
+            sys.exit(1)
+        
+        # 选择默认模型
+        if 'qwen-plus' in self.selected_provider.models:
+            self.selected_model = self.selected_provider.models['qwen-plus']
+        else:
+            self.selected_model = list(self.selected_provider.models.values())[0]
+        
+        # 默认配置路径
+        if sys.platform == 'win32':
+            config_dir = Path(os.environ.get('USERPROFILE', '')) / '.bridge-server'
+        else:
+            config_dir = Path.home() / '.bridge-server'
+        
+        config_dir.mkdir(parents=True, exist_ok=True)
+        self.config_path = str(config_dir / 'config.yaml')
+        
+        # 生成配置
+        self._generate_config()
+        
+        print(f"\n{Colors.GREEN}✅ 快速配置完成！{Colors.ENDC}")
+        print(f"\n配置文件：{self.config_path}")
+        print(f"\n下一步:")
+        print(f"  1. 编辑 .env 文件，填入你的 API Key")
+        if sys.platform == 'win32':
+            print(f"     notepad {config_dir / '.env'}")
+        else:
+            print(f"     nano {config_dir / '.env'}")
+        print(f"\n  2. 启动服务:")
+        print(f"     bridge-server start")
+        print()
     
     def _print_header(self):
         """打印欢迎头"""
@@ -436,8 +486,16 @@ class SetupWizard:
 
 def main():
     """主函数"""
-    wizard = SetupWizard()
-    wizard.run()
+    # 检查是否使用非交互模式
+    if '--no-interactive' in sys.argv or '--quick' in sys.argv:
+        # 非交互模式：生成默认配置
+        print("使用快速配置模式...")
+        wizard = SetupWizard()
+        wizard.run_quick()
+    else:
+        # 交互模式
+        wizard = SetupWizard()
+        wizard.run()
 
 
 if __name__ == "__main__":
