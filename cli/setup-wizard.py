@@ -312,25 +312,65 @@ class SetupWizard:
         print(f"  - API Key 仅保存在本地配置文件中")
         print(f"  - 不会上传到任何服务器")
         print(f"  - 建议使用环境变量或加密存储")
+        print(f"\n{Colors.CYAN}提示：直接粘贴 API Key 后按回车即可{Colors.ENDC}")
+        print(f"\n{Colors.GREEN}选项：{Colors.ENDC}")
+        print(f"  1. 输入 API Key")
+        print(f"  2. 使用自定义 API 端点")
+        print(f"  3. 跳过（稍后手动配置）")
         
         while True:
             try:
-                api_key = input(f"\n请输入 API Key: ").strip()
+                choice = input(f"\n请选择 [1-3]: ").strip()
                 
-                if not api_key:
-                    print(f"{Colors.RED}API Key 不能为空{Colors.ENDC}")
-                    continue
-                
-                # 简单验证格式
-                if len(api_key) < 10:
-                    print(f"{Colors.YELLOW}⚠️  API Key 看起来太短，确认继续？[y/N]: {Colors.ENDC}", end='')
-                    confirm = input().strip().lower()
-                    if confirm != 'y':
+                if choice == '3':
+                    print(f"\n{Colors.YELLOW}⚠️  稍后请手动配置 API Key{Colors.ENDC}")
+                    self.api_key = "sk-xxx"  # 占位符
+                    break
+                elif choice == '2':
+                    # 自定义端点
+                    custom_endpoint = input("请输入自定义 API 端点 (回车跳过): ").strip()
+                    custom_model = input("请输入自定义模型名称 (回车跳过): ").strip()
+                    
+                    if custom_endpoint:
+                        self.selected_provider.api_base = custom_endpoint
+                        print(f"✅ 自定义端点：{custom_endpoint}")
+                    if custom_model:
+                        # 创建临时模型
+                        from providers.loader import Model
+                        self.selected_model = Model(
+                            name=custom_model,
+                            description="自定义模型",
+                            context_length=32000,
+                            pricing=None
+                        )
+                        print(f"✅ 自定义模型：{custom_model}")
+                    
+                    # 继续输入 API Key
+                    api_key = input("请输入 API Key: ").strip()
+                    if not api_key:
+                        print(f"{Colors.RED}API Key 不能为空{Colors.ENDC}")
                         continue
-                
-                self.api_key = api_key
-                print(f"\n✅ API Key 已配置")
-                break
+                    self.api_key = api_key
+                    print(f"\n✅ API Key 已配置")
+                    break
+                else:
+                    # 选项 1: 直接输入 API Key
+                    api_key = input("请输入 API Key: ").strip()
+                    
+                    if not api_key:
+                        print(f"{Colors.RED}API Key 不能为空{Colors.ENDC}")
+                        continue
+                    
+                    # 简单验证格式
+                    if len(api_key) < 10:
+                        print(f"{Colors.YELLOW}⚠️  API Key 看起来太短，确认继续？[y/N]: {Colors.ENDC}", end='')
+                        confirm = input().strip().lower()
+                        if confirm != 'y':
+                            continue
+                    
+                    self.api_key = api_key
+                    print(f"\n✅ API Key 已配置")
+                    break
             except EOFError:
                 sys.exit(0)
     
