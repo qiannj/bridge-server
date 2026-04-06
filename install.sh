@@ -91,11 +91,8 @@ download_code() {
     log_info "下载 Bridge Server..."
     mkdir -p "$INSTALL_DIR"
     
-    # 这里使用本地文件，实际发布时应该从 GitHub 下载
-    # curl -fsSL https://github.com/your-org/bridge-server/archive/refs/tags/v1.0.0.tar.gz | tar -xz -C "$INSTALL_DIR" --strip-components=1
-    
-    # 临时使用本地文件
-    cp -r /home/pi/.openclaw/workspace/bridge-server-product/* "$INSTALL_DIR/"
+    # 从 GitHub 下载最新版本
+    curl -fsSL https://github.com/qiannj/bridge-server/archive/refs/tags/v1.0.0.tar.gz | tar -xz -C "$INSTALL_DIR" --strip-components=1
     
     log_success "代码下载完成：$INSTALL_DIR"
 }

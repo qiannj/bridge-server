@@ -54,12 +54,24 @@ function Get-BridgeCode {
     
     Write-Info "下载 Bridge Server..."
     
-    # 这里使用本地文件，实际发布时应该从 GitHub 下载
-    # Invoke-WebRequest -Uri "https://github.com/your-org/bridge-server/archive/refs/tags/v1.0.0.tar.gz" -OutFile "$env:TEMP\bridge-server.tar.gz"
-    # Expand-Archive -Path "$env:TEMP\bridge-server.tar.gz" -DestinationPath $installDir
+    # 从 GitHub 下载最新版本
+    $releaseUrl = "https://github.com/qiannj/bridge-server/archive/refs/tags/v1.0.0.tar.gz"
+    $tempFile = "$env:TEMP\bridge-server.tar.gz"
     
-    # 临时使用本地文件（仅用于测试）
-    Copy-Item -Path "/home/pi/.openclaw/workspace/bridge-server-product/*" -Destination $installDir -Recurse -Force
+    Invoke-WebRequest -Uri $releaseUrl -OutFile $tempFile
+    Expand-Archive -Path $tempFile -DestinationPath $installDir -Force
+    
+    # 移动解压后的内容到安装目录
+    $extractedDir = Get-ChildItem "$installDir\bridge-server-*" | Select-Object -First 1
+    if ($extractedDir) {
+        Move-Item -Path "$($extractedDir.FullName)\*" -Destination $installDir -Force
+        Remove-Item -Path $extractedDir.FullName -Recurse -Force
+    }
+    
+    # 清理临时文件
+    if (Test-Path $tempFile) {
+        Remove-Item -Path $tempFile -Force
+    }
     
     Write-Success "代码下载完成：$installDir"
 }
