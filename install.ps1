@@ -59,14 +59,9 @@ function Get-BridgeCode {
     $tempFile = "$env:TEMP\bridge-server.tar.gz"
     
     Invoke-WebRequest -Uri $releaseUrl -OutFile $tempFile
-    Expand-Archive -Path $tempFile -DestinationPath $installDir -Force
     
-    # 移动解压后的内容到安装目录
-    $extractedDir = Get-ChildItem "$installDir\bridge-server-*" | Select-Object -First 1
-    if ($extractedDir) {
-        Move-Item -Path "$($extractedDir.FullName)\*" -Destination $installDir -Force
-        Remove-Item -Path $extractedDir.FullName -Recurse -Force
-    }
+    # 使用 tar 解压（Windows 10+ 自带 tar 命令）
+    tar -xzf $tempFile -C "$installDir\.." --strip-components=1
     
     # 清理临时文件
     if (Test-Path $tempFile) {
