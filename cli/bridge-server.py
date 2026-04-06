@@ -443,8 +443,10 @@ def cmd_setup():
     if wizard_path.exists():
         # 安全修复：使用 subprocess.run 替代 os.system，防止命令注入
         import subprocess
+        import sys
+        # 使用当前 Python 解释器路径（跨平台兼容）
         result = subprocess.run(
-            ["python3", str(wizard_path)],
+            [sys.executable, str(wizard_path)],
             check=False
         )
         if result.returncode != 0:
