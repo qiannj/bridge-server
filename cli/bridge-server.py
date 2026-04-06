@@ -171,9 +171,10 @@ def cmd_start():
     os.chdir(src_dir)
     # 安全修复：使用 subprocess.run 替代 os.system，防止命令注入
     import subprocess
+    import sys
     log_file = open(LOG_FILE, 'a')
     subprocess.Popen(
-        ["python3", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"],
+        [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"],
         stdout=log_file,
         stderr=subprocess.STDOUT,
         start_new_session=True
