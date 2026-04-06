@@ -102,10 +102,10 @@ $ bridge-server usage --today
 
 ```bash
 # Linux/macOS
-curl -fsSL https://example.com/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/qiannj/bridge-server/main/install.sh | bash
 
 # Windows PowerShell
-Invoke-WebRequest -Uri https://example.com/install.ps1 -OutFile install.ps1
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/qiannj/bridge-server/main/install.ps1 -OutFile install.ps1
 .\install.ps1
 
 # Docker（推荐）
@@ -124,10 +124,10 @@ docker run -d -p 19377:19377 \
 
 ```bash
 # Linux/macOS
-curl -fsSL https://example.com/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/qiannj/bridge-server/main/install.sh | bash
 
 # Windows
-powershell -Command "Invoke-WebRequest -Uri 'https://example.com/install.ps1' -OutFile 'install.ps1'; .\install.ps1"
+powershell -Command "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/qiannj/bridge-server/main/install.ps1' -OutFile 'install.ps1'; .\install.ps1"
 ```
 
 ### 步骤 2: 配置
@@ -338,10 +338,10 @@ AGPL-3.0 License - 详见 [LICENSE](LICENSE) 文件
 
 遇到问题？我们来帮你！
 
-- 🐛 **Bug 反馈**: [GitHub Issues](https://github.com/your-org/bridge-server/issues)
-- 💬 **讨论交流**: [Discussions](https://github.com/your-org/bridge-server/discussions)
-- 📧 **邮件联系**: support@example.com
-- 📖 **文档**: https://docs.bridge-server.dev
+- 🐛 **Bug 反馈**: [GitHub Issues](https://github.com/qiannj/bridge-server/issues)
+- 💬 **讨论交流**: [Discussions](https://github.com/qiannj/bridge-server/discussions)
+- 📧 **邮件联系**: qxy19921026@gmail.com
+- 📖 **文档**: https://github.com/qiannj/bridge-server#readme
 
 ---
 
