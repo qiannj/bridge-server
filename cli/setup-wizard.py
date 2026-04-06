@@ -428,7 +428,12 @@ class SetupWizard:
         """选择模型"""
         print(f"\n{provider.name} 可用模型:")
         
-        models = list(provider.models.values())
+        # 兼容 models 是 list 或 dict
+        if isinstance(provider.models, dict):
+            models = list(provider.models.values())
+        else:
+            models = provider.models
+        
         for i, m in enumerate(models[:10], 1):  # 最多显示 10 个
             price = f"¥{m.pricing.input_per_1k}/1K" if m.pricing else "N/A"
             print(f"  {i}. {m.name} (ctx: {m.context_length}, price: {price})")
@@ -437,7 +442,7 @@ class SetupWizard:
             print(f"  ... 还有 {len(models) - 10} 个模型")
         
         print(f"\n输入模型编号，多个用逗号分隔 (如 1,2,3)")
-        choice = input("选择: ").strip()
+        choice = input("选择：").strip()
         
         if not choice:
             return []
