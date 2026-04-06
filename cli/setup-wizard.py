@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
 """
-Bridge Server Setup Wizard
+Bridge Server Setup Wizard v2.0
 
-交互式配置向导，帮助用户快速选择提供商和模型
-支持全球 15 家主流提供商，40+ 模型
+全新的配置向导：
+- 支持配置多个模型/提供商
+- 支持自定义 Provider（Base URL + 多个模型）
+- 自动选择路由规则场景
+- 配置完成后自动启动服务
+- 生成用户侧 API Key 和 Base URL
 """
 
 import sys
 import os
 import yaml
+import json
+import secrets
 import logging
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
+from datetime import datetime
 
 # 添加父目录到路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -23,14 +30,6 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-
-# Windows 兼容性：确保 input() 正常工作
-if sys.platform == 'win32':
-    # 在 Windows 上强制使用控制台输入
-    try:
-        import msvcrt
-    except ImportError:
-        pass
 
 
 class Colors:
@@ -47,41 +46,57 @@ class Colors:
 
 
 class SetupWizard:
-    """配置向导"""
+    """配置向导 v2.0"""
     
     def __init__(self):
         """初始化向导"""
         self.loader = ProviderLoader()
         self.providers = self.loader.load()
         
-        self.selected_region: Optional[str] = None
-        self.selected_provider: Optional[Provider] = None
-        self.selected_model: Optional[Model] = None
-        self.api_key: Optional[str] = None
-        self.config_path: Optional[str] = None
+        # 配置数据
+        self.config = {
+            'version': '2.0.0',
+            'server': {
+                'host': '0.0.0.0',
+                'port': 8080,
+                'debug': False
+            },
+            'providers': [],  # 多个提供商配置
+            'routing': {
+                'strategy': 'fallback',
+                'timeout': 30,
+                'max_retries': 3
+            },
+            'auth': {
+                'api_keys': []  # 用户侧 API Keys
+            }
+        }
         
+        self.config_dir: Optional[Path] = None
+        self.env_path: Optional[Path] = None
+    
     def run(self):
         """运行配置向导"""
         self._print_header()
         
         try:
-            # 1. 选择区域
-            self._select_region()
+            # 1. 选择配置模式
+            self._select_mode()
             
-            # 2. 选择提供商
-            self._select_provider()
+            # 2. 配置提供商和模型
+            self._configure_providers()
             
-            # 3. 选择模型
-            self._select_model()
+            # 3. 选择路由策略
+            self._select_routing()
             
-            # 4. 输入 API Key
-            self._input_api_key()
+            # 4. 生成用户侧 API Key
+            self._generate_auth()
             
-            # 5. 选择保存路径
-            self._select_config_path()
+            # 5. 保存配置
+            self._save_config()
             
-            # 6. 生成配置
-            self._generate_config()
+            # 6. 启动服务
+            self._start_service()
             
             # 7. 完成
             self._finish()
@@ -94,235 +109,273 @@ class SetupWizard:
             logger.exception("配置向导异常")
             sys.exit(1)
     
-    def run_quick(self):
-        """快速配置模式（非交互）"""
-        print("\n🚀 快速配置模式\n")
-        
-        # 默认使用通义千问 qwen-plus
-        self.selected_region = 'CN'
-        self.selected_provider = self.providers.get('dashscope')
-        
-        if not self.selected_provider:
-            print(f"{Colors.RED}错误：无法加载提供商配置{Colors.ENDC}")
-            sys.exit(1)
-        
-        # 选择默认模型
-        if 'qwen-plus' in self.selected_provider.models:
-            self.selected_model = self.selected_provider.models['qwen-plus']
-        else:
-            self.selected_model = list(self.selected_provider.models.values())[0]
-        
-        # 默认配置路径
-        if sys.platform == 'win32':
-            config_dir = Path(os.environ.get('USERPROFILE', '')) / '.bridge-server'
-        else:
-            config_dir = Path.home() / '.bridge-server'
-        
-        config_dir.mkdir(parents=True, exist_ok=True)
-        self.config_path = str(config_dir / 'config.yaml')
-        
-        # 生成配置
-        self._generate_config()
-        
-        print(f"\n{Colors.GREEN}✅ 快速配置完成！{Colors.ENDC}")
-        print(f"\n配置文件：{self.config_path}")
-        print(f"\n下一步:")
-        print(f"  1. 编辑 .env 文件，填入你的 API Key")
-        if sys.platform == 'win32':
-            print(f"     notepad {config_dir / '.env'}")
-        else:
-            print(f"     nano {config_dir / '.env'}")
-        print(f"\n  2. 启动服务:")
-        print(f"     bridge-server start")
-        print()
-    
     def _print_header(self):
         """打印欢迎头"""
         print(f"\n{Colors.CYAN}{'='*60}{Colors.ENDC}")
-        print(f"{Colors.CYAN}  Bridge Server 配置向导 v1.4.0{Colors.ENDC}")
+        print(f"{Colors.CYAN}  Bridge Server 配置向导 v2.0{Colors.ENDC}")
         print(f"{Colors.CYAN}{'='*60}{Colors.ENDC}")
         print(f"\n{Colors.GREEN}👋 欢迎使用 Bridge Server 快速配置工具！{Colors.ENDC}")
-        print(f"\n本工具将帮助您：")
-        print(f"  1️⃣  选择适合的 LLM 提供商")
-        print(f"  2️⃣  选择性价比最高的模型")
-        print(f"  3️⃣  配置 API Key")
-        print(f"  4️⃣  生成配置文件")
-        print(f"\n支持 {len(self.providers)} 家全球主流提供商，40+ 模型")
+        print(f"\n新功能：")
+        print(f"  ✅ 支持配置多个模型/提供商")
+        print(f"  ✅ 支持自定义 Provider (Base URL + 模型)")
+        print(f"  ✅ 自动选择路由策略")
+        print(f"  ✅ 配置完成后自动启动服务")
+        print(f"  ✅ 生成用户侧 API Key 和连接信息")
         print(f"\n{Colors.YELLOW}提示：使用 Ctrl+C 可随时退出{Colors.ENDC}\n")
     
-    def _select_region(self):
-        """选择区域"""
-        print(f"\n{Colors.BOLD}📍 步骤 1/5: 选择区域{Colors.ENDC}")
+    def _select_mode(self):
+        """选择配置模式"""
+        print(f"\n{Colors.BOLD}📋 步骤 1/5: 选择配置模式{Colors.ENDC}")
         print(f"{'-'*60}\n")
         
-        # 统计各区域提供商数量
-        region_stats = {}
-        for provider in self.providers.values():
-            region = provider.region
-            if region not in region_stats:
-                region_stats[region] = 0
-            region_stats[region] += 1
+        print("请选择配置模式：")
+        print("  1. 快速配置（推荐）- 自动配置主流模型")
+        print("  2. 自定义配置 - 手动选择提供商和模型")
+        print("  3. 高级配置 - 完全自定义（包括自定义 Base URL）")
         
-        # 显示选项
-        regions = [
-            ('CN', '🇨🇳 中国', region_stats.get('CN', 0)),
-            ('US', '🇺🇸 美国', region_stats.get('US', 0)),
-            ('EU', '🇪🇺 欧洲', region_stats.get('EU', 0)),
-            ('SG', '🌏 其他', region_stats.get('SG', 0)),
-            ('ALL', '🌍 全部', len(self.providers))
-        ]
-        
-        for i, (code, name, count) in enumerate(regions, 1):
-            print(f"  {i}. {name} ({count} 家提供商)")
-        
-        # 获取用户选择
         while True:
             try:
-                choice = input(f"\n请选择 [1-{len(regions)}]: ").strip()
-                if not choice.isdigit():
-                    print(f"{Colors.RED}请输入数字{Colors.ENDC}")
-                    continue
-                
-                idx = int(choice) - 1
-                if 0 <= idx < len(regions):
-                    self.selected_region = regions[idx][0]
-                    print(f"\n✅ 已选择：{regions[idx][1]}")
+                choice = input("\n请选择 [1-3]: ").strip()
+                if choice in ['1', '2', '3']:
+                    self.config['mode'] = ['quick', 'custom', 'advanced'][int(choice) - 1]
+                    print(f"\n✅ 已选择：{['快速配置', '自定义配置', '高级配置'][int(choice) - 1]}")
                     break
                 else:
-                    print(f"{Colors.RED}请输入 {1}-{len(regions)} 之间的数字{Colors.ENDC}")
+                    print(f"{Colors.RED}请输入 1-3 之间的数字{Colors.ENDC}")
             except EOFError:
                 sys.exit(0)
     
-    def _select_provider(self):
-        """选择提供商"""
-        print(f"\n{Colors.BOLD}🏢 步骤 2/5: 选择提供商{Colors.ENDC}")
+    def _configure_providers(self):
+        """配置提供商和模型"""
+        print(f"\n{Colors.BOLD}🏢 步骤 2/5: 配置提供商和模型{Colors.ENDC}")
         print(f"{'-'*60}\n")
         
-        # 过滤提供商
-        if self.selected_region == 'ALL':
-            providers = list(self.providers.values())
+        mode = self.config.get('mode', 'custom')
+        
+        if mode == 'quick':
+            # 快速配置：自动选择通义千问
+            self._quick_config()
+        elif mode == 'custom':
+            # 自定义配置：从预设列表选择
+            self._custom_config()
         else:
-            providers = [p for p in self.providers.values() if p.region == self.selected_region]
+            # 高级配置：完全自定义
+            self._advanced_config()
+    
+    def _quick_config(self):
+        """快速配置"""
+        print(f"\n{Colors.CYAN}快速配置模式{Colors.ENDC}")
+        print("自动配置以下模型：")
+        print("  - 通义千问 qwen-plus (主力)")
+        print("  - 通义千问 qwen-turbo (备用)")
         
-        # 排序（按模型数量）
-        providers.sort(key=lambda p: len(p.models), reverse=True)
+        provider = self.providers.get('dashscope')
+        if not provider:
+            print(f"{Colors.RED}错误：无法加载提供商配置{Colors.ENDC}")
+            return
         
-        # 显示选项
-        for i, provider in enumerate(providers, 1):
-            cheapest = provider.get_cheapest_model()
-            price_str = ""
-            if cheapest and cheapest.pricing:
-                price_str = f" (¥{cheapest.pricing.input_per_1k}/1K 起)"
-            
-            print(f"  {i:2d}. {provider.name:20s} - {len(provider.models)} 个模型{price_str}")
-            print(f"       {provider.name_en}")
+        # 配置提供商
+        api_key = self._input_api_key(provider.api_key_env, provider.api_key_url)
         
-        # 获取用户选择
+        self.config['providers'].append({
+            'name': 'dashscope',
+            'api_key_env': provider.api_key_env,
+            'models': [
+                {'id': 'qwen-plus', 'name': 'Qwen Plus', 'priority': 1},
+                {'id': 'qwen-turbo', 'name': 'Qwen Turbo', 'priority': 2}
+            ]
+        })
+        
+        # 保存 API Key 到 .env
+        self._save_env_var(provider.api_key_env, api_key)
+    
+    def _custom_config(self):
+        """自定义配置"""
+        print(f"\n{Colors.CYAN}自定义配置模式{Colors.ENDC}")
+        print("从预设列表选择提供商和模型\n")
+        
+        # 显示可用提供商
+        providers_list = list(self.providers.values())
+        for i, p in enumerate(providers_list, 1):
+            print(f"  {i}. {p.name} ({len(p.models)} 个模型)")
+        
         while True:
             try:
-                choice = input(f"\n请选择 [1-{len(providers)}]: ").strip()
+                choice = input(f"\n请选择提供商 [1-{len(providers_list)}] (回车跳过): ").strip()
+                if not choice:
+                    break
                 if not choice.isdigit():
                     print(f"{Colors.RED}请输入数字{Colors.ENDC}")
                     continue
                 
                 idx = int(choice) - 1
-                if 0 <= idx < len(providers):
-                    self.selected_provider = providers[idx]
-                    print(f"\n✅ 已选择：{self.selected_provider.name}")
-                    print(f"   官网：{self.selected_provider.website}")
-                    print(f"   配置文档：{self.selected_provider.api_key_url}")
-                    break
+                if 0 <= idx < len(providers_list):
+                    provider = providers_list[idx]
+                    
+                    # 输入 API Key
+                    api_key = self._input_api_key(provider.api_key_env, provider.api_key_url)
+                    
+                    # 选择模型
+                    models = self._select_models(provider)
+                    
+                    if models:
+                        self.config['providers'].append({
+                            'name': provider.name,
+                            'api_key_env': provider.api_key_env,
+                            'models': models
+                        })
+                        self._save_env_var(provider.api_key_env, api_key)
+                    
+                    # 询问是否继续添加
+                    more = input("\n继续添加其他提供商？[y/N]: ").strip().lower()
+                    if more != 'y':
+                        break
                 else:
-                    print(f"{Colors.RED}请输入 {1}-{len(providers)} 之间的数字{Colors.ENDC}")
+                    print(f"{Colors.RED}请输入 1-{len(providers_list)} 之间的数字{Colors.ENDC}")
             except EOFError:
                 sys.exit(0)
     
-    def _select_model(self):
+    def _advanced_config(self):
+        """高级配置"""
+        print(f"\n{Colors.CYAN}高级配置模式{Colors.ENDC}")
+        print("支持自定义 Base URL 和模型\n")
+        
+        while True:
+            try:
+                print("\n请选择配置类型：")
+                print("  1. 使用预设提供商")
+                print("  2. 自定义 Provider (Base URL + 模型)")
+                
+                choice = input("\n请选择 [1-2]: ").strip()
+                
+                if choice == '1':
+                    # 预设提供商
+                    providers_list = list(self.providers.values())
+                    for i, p in enumerate(providers_list, 1):
+                        print(f"  {i}. {p.name}")
+                    
+                    idx = input(f"选择 [1-{len(providers_list)}]: ").strip()
+                    if idx.isdigit() and 0 <= int(idx) - 1 < len(providers_list):
+                        provider = providers_list[int(idx) - 1]
+                        api_key = self._input_api_key(provider.api_key_env, provider.api_key_url)
+                        models = self._select_models(provider)
+                        
+                        if models:
+                            self.config['providers'].append({
+                                'name': provider.name,
+                                'api_key_env': provider.api_key_env,
+                                'models': models
+                            })
+                            self._save_env_var(provider.api_key_env, api_key)
+                
+                elif choice == '2':
+                    # 自定义 Provider
+                    print(f"\n{Colors.GREEN}自定义 Provider{Colors.ENDC}")
+                    
+                    name = input("Provider 名称 (如 my-llm): ").strip()
+                    if not name:
+                        print(f"{Colors.RED}名称不能为空{Colors.ENDC}")
+                        continue
+                    
+                    base_url = input("API Base URL (如 https://api.example.com/v1): ").strip()
+                    if not base_url:
+                        print(f"{Colors.RED}Base URL 不能为空{Colors.ENDC}")
+                        continue
+                    
+                    api_key_env = input("环境变量名 (如 MY_LLM_API_KEY): ").strip()
+                    if not api_key_env:
+                        api_key_env = f"{name.upper().replace('-', '_')}_API_KEY"
+                    
+                    api_key = self._input_api_key(api_key_env, "")
+                    
+                    # 添加多个模型
+                    models = []
+                    print(f"\n添加模型 (输入空行结束):")
+                    model_idx = 1
+                    while True:
+                        model_id = input(f"  模型{model_idx} ID: ").strip()
+                        if not model_id:
+                            break
+                        
+                        model_name = input(f"  模型{model_idx} 名称 (可选): ").strip()
+                        if not model_name:
+                            model_name = model_id
+                        
+                        priority = input(f"  优先级 (1=最高，回车=1): ").strip()
+                        if not priority:
+                            priority = 1
+                        
+                        models.append({
+                            'id': model_id,
+                            'name': model_name,
+                            'priority': int(priority)
+                        })
+                        model_idx += 1
+                    
+                    if models:
+                        provider_config = {
+                            'name': name,
+                            'api_key_env': api_key_env,
+                            'base_url': base_url,
+                            'models': models
+                        }
+                        self.config['providers'].append(provider_config)
+                        self._save_env_var(api_key_env, api_key)
+                        print(f"\n✅ 已添加自定义 Provider: {name}")
+                
+                # 询问是否继续
+                more = input("\n继续添加其他 Provider？[y/N]: ").strip().lower()
+                if more != 'y':
+                    break
+                    
+            except EOFError:
+                sys.exit(0)
+    
+    def _select_models(self, provider: Provider) -> List[Dict]:
         """选择模型"""
-        print(f"\n{Colors.BOLD}🤖 步骤 3/5: 选择模型{Colors.ENDC}")
-        print(f"{'-'*60}\n")
+        print(f"\n{provider.name} 可用模型:")
         
-        if not self.selected_provider:
-            print(f"{Colors.RED}错误：未选择提供商{Colors.ENDC}")
-            return
+        models = list(provider.models.values())
+        for i, m in enumerate(models[:10], 1):  # 最多显示 10 个
+            price = f"¥{m.pricing.input_per_1k}/1K" if m.pricing else "N/A"
+            print(f"  {i}. {m.name} (ctx: {m.context_length}, price: {price})")
         
-        models = self.selected_provider.models
+        if len(models) > 10:
+            print(f"  ... 还有 {len(models) - 10} 个模型")
         
-        # 分类显示
-        print(f"{Colors.BOLD}按推荐度排序:{Colors.ENDC}\n")
+        print(f"\n输入模型编号，多个用逗号分隔 (如 1,2,3)")
+        choice = input("选择: ").strip()
         
-        # 按价格排序（从便宜到贵）
-        models_sorted = sorted(models, key=lambda m: m.pricing.input_per_1k if m.pricing else 999)
+        if not choice:
+            return []
         
-        for i, model in enumerate(models_sorted, 1):
-            price_str = ""
-            if model.pricing:
-                price_str = f"¥{model.pricing.input_per_1k}/¥{model.pricing.output_per_1k} per 1K"
-            
-            context_str = f"{model.context_length // 1000}K" if model.context_length >= 1000 else f"{model.context_length}"
-            
-            caps = ", ".join(model.capabilities[:3]) if model.capabilities else "通用"
-            
-            print(f"  {i:2d}. {model.name:25s} - {context_str:6s} 上下文")
-            print(f"       {model.description}")
-            print(f"       能力：{caps}")
-            print(f"       价格：{price_str}")
-            
-            if model.benchmarks:
-                benchmark_str = ", ".join(f"{k}:{v}" for k, v in list(model.benchmarks.items())[:2])
-                print(f"       基准：{benchmark_str}")
-            
-            print()
-        
-        # 获取用户选择
-        while True:
-            try:
-                choice = input(f"请选择 [1-{len(models)}]: ").strip()
-                if not choice.isdigit():
-                    print(f"{Colors.RED}请输入数字{Colors.ENDC}")
-                    continue
-                
-                idx = int(choice) - 1
+        selected = []
+        for c in choice.split(','):
+            c = c.strip()
+            if c.isdigit():
+                idx = int(c) - 1
                 if 0 <= idx < len(models):
-                    self.selected_model = models_sorted[idx]
-                    print(f"\n✅ 已选择：{self.selected_model.name}")
-                    print(f"   描述：{self.selected_model.description}")
-                    print(f"   上下文：{self.selected_model.context_length} tokens")
-                    if self.selected_model.pricing:
-                        print(f"   价格：{self.selected_model.pricing}")
-                    break
-                else:
-                    print(f"{Colors.RED}请输入 {1}-{len(models)} 之间的数字{Colors.ENDC}")
-            except EOFError:
-                sys.exit(0)
+                    selected.append({
+                        'id': models[idx].name,
+                        'name': models[idx].name,
+                        'priority': idx + 1
+                    })
+        
+        return selected
     
-    def _input_api_key(self):
+    def _input_api_key(self, env_name: str, url: str) -> str:
         """输入 API Key"""
-        print(f"\n{Colors.BOLD}🔑 步骤 4/5: 配置 API Key{Colors.ENDC}")
-        print(f"{'-'*60}\n")
+        print(f"\n配置 API Key:")
+        print(f"  环境变量：{Colors.YELLOW}{env_name}{Colors.ENDC}")
+        if url:
+            print(f"  获取地址：{url}")
         
-        if not self.selected_provider:
-            print(f"{Colors.RED}错误：未选择提供商{Colors.ENDC}")
-            return
+        print(f"\n{Colors.CYAN}提示：直接粘贴 API Key 后按回车{Colors.ENDC}")
         
-        print(f"提供商：{self.selected_provider.name}")
-        print(f"环境变量：{Colors.YELLOW}{self.selected_provider.api_key_env}{Colors.ENDC}")
-        print(f"\n获取 API Key: {self.selected_provider.api_key_url}")
-        print(f"\n{Colors.YELLOW}⚠️  提示：{Colors.ENDC}")
-        print(f"  - API Key 仅保存在本地配置文件中")
-        print(f"  - 不会上传到任何服务器")
-        print(f"  - 建议使用环境变量或加密存储")
-        print(f"\n{Colors.CYAN}提示：直接粘贴 API Key 后按回车即可{Colors.ENDC}")
-        print(f"\n{Colors.GREEN}选项：{Colors.ENDC}")
-        print(f"  1. 输入 API Key")
-        print(f"  2. 使用自定义 API 端点")
-        print(f"  3. 跳过（稍后手动配置）")
-        
-        # Windows 兼容性：刷新输入缓冲区（修复 PSReadLine 粘贴问题）
+        # Windows 兼容性：清空输入缓冲区
         if sys.platform == 'win32':
             try:
                 import msvcrt
-                # 清空输入缓冲区
                 while msvcrt.kbhit():
                     msvcrt.getch()
             except ImportError:
@@ -330,231 +383,197 @@ class SetupWizard:
         
         while True:
             try:
-                choice = input(f"\n请选择 [1-3]: ").strip()
-                
-                if choice == '3':
-                    print(f"\n{Colors.YELLOW}⚠️  稍后请手动配置 API Key{Colors.ENDC}")
-                    self.api_key = "sk-xxx"  # 占位符
-                    break
-                elif choice == '2':
-                    # 自定义端点
-                    # 再次刷新缓冲区
-                    if sys.platform == 'win32':
-                        try:
-                            import msvcrt
-                            while msvcrt.kbhit():
-                                msvcrt.getch()
-                        except ImportError:
-                            pass
-                    
-                    custom_endpoint = input("请输入自定义 API 端点 (回车跳过): ").strip()
-                    custom_model = input("请输入自定义模型名称 (回车跳过): ").strip()
-                    
-                    if custom_endpoint:
-                        self.selected_provider.api_base = custom_endpoint
-                        print(f"✅ 自定义端点：{custom_endpoint}")
-                    if custom_model:
-                        # 创建临时模型
-                        from providers.loader import Model
-                        self.selected_model = Model(
-                            name=custom_model,
-                            description="自定义模型",
-                            context_length=32000,
-                            pricing=None
-                        )
-                        print(f"✅ 自定义模型：{custom_model}")
-                    
-                    # 继续输入 API Key
-                    api_key = input("请输入 API Key: ").strip()
-                    if not api_key:
-                        print(f"{Colors.RED}API Key 不能为空{Colors.ENDC}")
-                        continue
-                    self.api_key = api_key
-                    print(f"\n✅ API Key 已配置")
-                    break
+                api_key = input("\n请输入 API Key: ").strip()
+                if api_key:
+                    return api_key
                 else:
-                    # 选项 1: 直接输入 API Key
-                    api_key = input("请输入 API Key: ").strip()
-                    
-                    if not api_key:
-                        print(f"{Colors.RED}API Key 不能为空{Colors.ENDC}")
-                        continue
-                    
-                    # 简单验证格式
-                    if len(api_key) < 10:
-                        print(f"{Colors.YELLOW}⚠️  API Key 看起来太短，确认继续？[y/N]: {Colors.ENDC}", end='')
-                        confirm = input().strip().lower()
-                        if confirm != 'y':
-                            continue
-                    
-                    self.api_key = api_key
-                    print(f"\n✅ API Key 已配置")
-                    break
+                    print(f"{Colors.RED}API Key 不能为空{Colors.ENDC}")
             except EOFError:
                 sys.exit(0)
     
-    def _select_config_path(self):
-        """选择配置文件路径"""
-        print(f"\n{Colors.BOLD}📁 步骤 5/5: 选择保存路径{Colors.ENDC}")
-        print(f"{'-'*60}\n")
+    def _save_env_var(self, name: str, value: str):
+        """保存环境变量到 .env 文件"""
+        if self.env_path is None:
+            self.env_path = self.config_dir / '.env'
         
-        default_path = "config.yaml"
-        print(f"默认路径：{Colors.YELLOW}{default_path}{Colors.ENDC}")
+        # 读取现有内容
+        env_content = {}
+        if self.env_path.exists():
+            with open(self.env_path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        k, v = line.split('=', 1)
+                        env_content[k.strip()] = v.strip()
         
-        try:
-            path = input(f"\n请输入路径 [回车使用默认]: ").strip()
-            if not path:
-                path = default_path
-            
-            self.config_path = path
-            print(f"\n✅ 配置文件将保存到：{path}")
-        except EOFError:
-            sys.exit(0)
+        # 更新
+        env_content[name] = value
+        
+        # 写入
+        with open(self.env_path, 'w') as f:
+            f.write(f"# Bridge Server 环境变量\n")
+            f.write(f"# 生成时间：{datetime.now().isoformat()}\n\n")
+            for k, v in env_content.items():
+                f.write(f"{k}={v}\n")
     
-    def _generate_config(self):
-        """生成配置文件"""
-        print(f"\n{Colors.BOLD}⚙️  生成配置...{Colors.ENDC}")
+    def _select_routing(self):
+        """选择路由策略"""
+        print(f"\n{Colors.BOLD}🔀 步骤 3/5: 选择路由策略{Colors.ENDC}")
         print(f"{'-'*60}\n")
         
-        if not all([self.selected_provider, self.selected_model, self.api_key]):
-            print(f"{Colors.RED}错误：配置信息不完整{Colors.ENDC}")
-            return
+        print("路由策略决定如何分发请求到多个模型：\n")
+        print("  1. Fallback (故障转移) - 主模型失败时自动切换到备用")
+        print("  2. Load Balance (负载均衡) - 均匀分发到所有模型")
+        print("  3. Priority (优先级) - 按优先级顺序使用模型")
+        print("  4. Round Robin (轮询) - 轮流使用每个模型")
         
-        # 构建配置
-        config = {
-            'version': '1.4.0',
-            'created_at': __import__('datetime').datetime.now().isoformat(),
-            
-            'server': {
-                'host': '0.0.0.0',
-                'port': 19377,
-                'auth_tokens': [
-                    self.api_key  # 使用用户输入的 API Key 作为初始 token
-                ],
-                'rate_limiting': {
-                    'enabled': True,
-                    'requests_per_minute': 60,
-                    'tokens_per_minute': 100000
-                }
-            },
-            
-            'providers': {
-                'template': self.selected_provider.id,
-                'selected_model': self.selected_model.id,
-                
-                'custom': [
-                    {
-                        'id': self.selected_provider.id,
-                        'name': self.selected_provider.name,
-                        'base_url': self.selected_provider.base_url,
-                        'api_key_env': self.selected_provider.api_key_env,
-                        'models': [
-                            {
-                                'id': self.selected_model.id,
-                                'name': self.selected_model.name,
-                                'context_length': self.selected_model.context_length,
-                                'max_output_tokens': self.selected_model.max_output_tokens
-                            }
-                        ]
-                    }
-                ]
-            },
-            
-            'budget': {
-                'daily_limit': 100.0,  # CNY
-                'monthly_limit': 3000.0,  # CNY
-                'alert_threshold': 0.8  # 80% 时告警
-            },
-            
-            'logging': {
-                'level': 'INFO',
-                'file': str(Path.home() / '.local' / 'var' / 'log' / 'bridge-server' / 'bridge-server.log'),
-                'max_size_mb': 100,
-                'backup_count': 5
-            }
+        strategies = {
+            '1': 'fallback',
+            '2': 'load_balance',
+            '3': 'priority',
+            '4': 'round_robin'
         }
         
-        # 设置环境变量提示
-        config['environment'] = {
-            self.selected_provider.api_key_env: 'sk-xxx (请替换为真实 API Key)'
-        }
+        while True:
+            try:
+                choice = input("\n请选择 [1-4] (推荐 1): ").strip()
+                if choice in strategies:
+                    self.config['routing']['strategy'] = strategies[choice]
+                    print(f"\n✅ 已选择：{strategies[choice]}")
+                    break
+                else:
+                    print(f"{Colors.RED}请输入 1-4 之间的数字{Colors.ENDC}")
+            except EOFError:
+                sys.exit(0)
         
-        # 保存到文件
+        # 配置超时和重试
+        timeout = input("\n请求超时时间 (秒，回车=30): ").strip()
+        if timeout:
+            self.config['routing']['timeout'] = int(timeout)
+        
+        retries = input("最大重试次数 (回车=3): ").strip()
+        if retries:
+            self.config['routing']['max_retries'] = int(retries)
+    
+    def _generate_auth(self):
+        """生成用户侧认证信息"""
+        print(f"\n{Colors.BOLD}🔐 步骤 4/5: 生成认证信息{Colors.ENDC}")
+        print(f"{'-'*60}\n")
+        
+        # 生成用户侧 API Key
+        api_key = f"sk-{secrets.token_hex(16)}"
+        self.config['auth']['api_keys'].append({
+            'key': api_key,
+            'name': 'Default Key',
+            'created_at': datetime.now().isoformat(),
+            'permissions': ['chat', 'embeddings']
+        })
+        
+        print(f"{Colors.GREEN}✅ 已生成用户侧 API Key{Colors.ENDC}")
+        print(f"\n连接信息：")
+        print(f"  Base URL: http://localhost:{self.config['server']['port']}/v1")
+        print(f"  API Key:  {Colors.YELLOW}{api_key}{Colors.ENDC}")
+        print(f"\n{Colors.CYAN}提示：可以将此 API Key 分发给应用使用{Colors.ENDC}")
+        
+        # 保存到 auth.yaml
+        auth_path = self.config_dir / 'auth.yaml'
+        with open(auth_path, 'w') as f:
+            yaml.dump({'api_keys': self.config['auth']['api_keys']}, f, default_flow_style=False)
+    
+    def _save_config(self):
+        """保存配置文件"""
+        print(f"\n{Colors.BOLD}📁 步骤 5/6: 保存配置{Colors.ENDC}")
+        print(f"{'-'*60}\n")
+        
+        # 确定配置目录
+        if sys.platform == 'win32':
+            self.config_dir = Path(os.environ.get('USERPROFILE', '')) / '.bridge-server'
+        else:
+            self.config_dir = Path.home() / '.bridge-server'
+        
+        self.config_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 保存 config.yaml
+        config_path = self.config_dir / 'config.yaml'
+        with open(config_path, 'w') as f:
+            yaml.dump(self.config, f, default_flow_style=False, allow_unicode=True)
+        
+        print(f"✅ 配置文件已保存:")
+        print(f"   {config_path}")
+        print(f"\n✅ 环境变量已保存:")
+        print(f"   {self.env_path}")
+        print(f"\n✅ 认证信息已保存:")
+        print(f"   {self.config_dir / 'auth.yaml'}")
+    
+    def _start_service(self):
+        """启动服务"""
+        print(f"\n{Colors.BOLD}🚀 启动服务{Colors.ENDC}")
+        print(f"{'-'*60}\n")
+        
         try:
-            config_path = Path(self.config_path)
+            import subprocess
             
-            # 备份已有配置
-            if config_path.exists():
-                backup_path = config_path.with_suffix('.yaml.bak')
-                config_path.rename(backup_path)
-                print(f"✅ 已备份旧配置：{backup_path}")
+            # 使用虚拟环境的 Python
+            if sys.platform == 'win32':
+                python_exe = self.config_dir.parent / 'opt' / 'bridge-server' / 'venv' / 'Scripts' / 'python.exe'
+            else:
+                python_exe = self.config_dir.parent / 'opt' / 'bridge-server' / 'venv' / 'bin' / 'python'
             
-            # 写入新配置
-            with open(config_path, 'w', encoding='utf-8') as f:
-                yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
+            if not python_exe.exists():
+                python_exe = sys.executable
             
-            print(f"✅ 配置文件已保存：{config_path}")
+            print(f"启动 Uvicorn 服务...")
             
-            # 生成 .env 文件
-            env_path = Path('.env')
-            env_content = f"# Bridge Server Environment\n\n"
-            env_content += f"# API Key for {self.selected_provider.name}\n"
-            env_content += f"{self.selected_provider.api_key_env}=sk-xxx\n"
-            env_content += f"# TODO: 将 sk-xxx 替换为您的真实 API Key\n"
+            # 启动服务
+            log_file = open(self.config_dir / 'server.log', 'a')
+            process = subprocess.Popen(
+                [
+                    str(python_exe), '-m', 'uvicorn',
+                    'app.main:app',
+                    '--host', '0.0.0.0',
+                    '--port', str(self.config['server']['port'])
+                ],
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                cwd=self.config_dir.parent / 'opt' / 'bridge-server' if sys.platform == 'win32' else Path(__file__).parent.parent
+            )
+            log_file.close()
             
-            if not env_path.exists():
-                with open(env_path, 'w', encoding='utf-8') as f:
-                    f.write(env_content)
-                print(f"✅ 环境变量文件已保存：{env_path}")
+            print(f"{Colors.GREEN}✅ 服务已启动！{Colors.ENDC}")
+            print(f"   PID: {process.pid}")
+            print(f"   端口：{self.config['server']['port']}")
             
         except Exception as e:
-            print(f"{Colors.RED}❌ 保存配置失败：{e}{Colors.ENDC}")
-            raise
+            print(f"{Colors.YELLOW}⚠️  服务启动失败，可以手动启动：{Colors.ENDC}")
+            print(f"   bridge-server start")
     
     def _finish(self):
-        """完成配置"""
+        """完成"""
         print(f"\n{Colors.CYAN}{'='*60}{Colors.ENDC}")
-        print(f"{Colors.GREEN}✅ 配置完成！{Colors.ENDC}")
+        print(f"{Colors.GREEN}🎉 配置完成！{Colors.ENDC}")
         print(f"{Colors.CYAN}{'='*60}{Colors.ENDC}\n")
         
-        print(f"📋 配置摘要:")
-        print(f"  提供商：{self.selected_provider.name}")
-        print(f"  模型：{self.selected_model.name}")
-        print(f"  上下文：{self.selected_model.context_length} tokens")
-        if self.selected_model.pricing:
-            print(f"  价格：{self.selected_model.pricing}")
-        print(f"  配置文件：{self.config_path}")
-        
-        print(f"\n🚀 下一步:")
-        print(f"  1. 编辑配置文件（如需要）:")
-        print(f"     nano {self.config_path}")
-        print(f"\n  2. 设置环境变量:")
-        print(f"     export {self.selected_provider.api_key_env}=your-api-key")
-        print(f"\n  3. 启动服务:")
-        print(f"     bridge-server start")
-        print(f"\n  4. 测试连接:")
-        print(f"     curl http://localhost:19377/health")
-        
-        print(f"\n{Colors.YELLOW}⚠️  重要提示:{Colors.ENDC}")
-        print(f"  - 请将 .env 文件中的 sk-xxx 替换为您的真实 API Key")
-        print(f"  - 不要将 API Key 提交到版本控制系统")
-        print(f"  - 定期检查用量，避免超出预算")
-        
-        print(f"\n{Colors.GREEN}🎉 祝您使用愉快！{Colors.ENDC}\n")
+        print(f"连接信息：")
+        print(f"  Base URL: http://localhost:{self.config['server']['port']}/v1")
+        print(f"  API Key:  {self.config['auth']['api_keys'][0]['key']}")
+        print(f"\n测试连接：")
+        print(f"  curl http://localhost:{self.config['server']['port']}/health")
+        print(f"\n查看日志：")
+        if sys.platform == 'win32':
+            print(f"  notepad {self.config_dir / 'server.log'}")
+        else:
+            print(f"  tail -f {self.config_dir / 'server.log'}")
+        print(f"\n管理命令：")
+        print(f"  bridge-server start    - 启动服务")
+        print(f"  bridge-server stop     - 停止服务")
+        print(f"  bridge-server status   - 查看状态")
+        print(f"\n{Colors.GREEN}祝您使用愉快！{Colors.ENDC}\n")
 
 
 def main():
     """主函数"""
-    # 检查是否使用非交互模式
-    if '--no-interactive' in sys.argv or '--quick' in sys.argv:
-        # 非交互模式：生成默认配置
-        print("使用快速配置模式...")
-        wizard = SetupWizard()
-        wizard.run_quick()
-    else:
-        # 交互模式
-        wizard = SetupWizard()
-        wizard.run()
+    wizard = SetupWizard()
+    wizard.run()
 
 
 if __name__ == "__main__":
