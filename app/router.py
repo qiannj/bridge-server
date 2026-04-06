@@ -176,16 +176,36 @@ def find_full_model_id(model_name: str, config: dict) -> str:
     """
     查找模型的完整 ID（包含 provider 前缀）
     """
-    providers = config.get("providers", {})
-
-    for provider_name, provider_config in providers.items():
-        if not provider_config.get("enabled", False):
-            continue
-
-        models = provider_config.get("models", {})
-        if model_name in models:
-            return f"{provider_name}/{model_name}"
-
+    providers = config.get("providers", [])
+    
+    # 兼容新格式（list）
+    if isinstance(providers, list):
+        for provider_config in providers:
+            if not provider_config.get("enabled", True):  # 默认启用
+                continue
+            
+            models = provider_config.get("models", [])
+            if isinstance(models, list):
+                for model in models:
+                    model_id = model.get("id", "") if isinstance(model, dict) else str(model)
+                    if model_id == model_name:
+                        provider_name = provider_config.get("name", "unknown")
+                        return f"{provider_name}/{model_id}"
+            elif isinstance(models, dict):
+                if model_name in models:
+                    provider_name = provider_config.get("name", "unknown")
+                    return f"{provider_name}/{model_name}"
+    
+    # 兼容旧格式（dict）
+    elif isinstance(providers, dict):
+        for provider_name, provider_config in providers.items():
+            if not provider_config.get("enabled", False):
+                continue
+            
+            models = provider_config.get("models", {})
+            if model_name in models:
+                return f"{provider_name}/{model_name}"
+    
     return model_name
 
 
@@ -204,14 +224,39 @@ async def call_llm(
     if "/" in model:
         provider, model_name = model.split("/", 1)
     else:
-        provider = "dashscope"
+        provider = None
         model_name = model
-
-    providers = config.get("providers", {})
-    provider_config = providers.get(provider, {})
-
-    if not provider_config.get("enabled", False):
-        raise ValueError(f"Provider '{provider}' 未启用")
+    
+    # 查找 provider 配置（支持 list 和 dict）
+    providers = config.get("providers", [])
+    provider_config = None
+    
+    if isinstance(providers, list):
+        # 新格式：list
+        for p in providers:
+            p_name = p.get("name", "")
+            if provider:
+                if p_name == provider:
+                    provider_config = p
+                    break
+            else:
+                # 没有指定 provider，查找模型
+                models = p.get("models", [])
+                if isinstance(models, list):
+                    for m in models:
+                        m_id = m.get("id", "") if isinstance(m, dict) else str(m)
+                        if m_id == model_name:
+                            provider_config = p
+                            provider = p_name
+                            break
+                if provider_config:
+                    break
+    elif isinstance(providers, dict):
+        # 旧格式：dict
+        provider_config = providers.get(provider, {})
+    
+    if not provider_config:
+        raise ValueError(f"Provider '{provider}' 或模型 '{model_name}' 未找到")
 
     # 获取 API Key
     api_key = provider_config.get("api_key", "")
