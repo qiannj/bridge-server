@@ -491,6 +491,14 @@ class SetupWizard:
     
     def _save_env_var(self, name: str, value: str):
         """保存环境变量到 .env 文件"""
+        # 初始化配置目录（如果还没初始化）
+        if self.config_dir is None:
+            if sys.platform == 'win32':
+                self.config_dir = Path(os.environ.get('USERPROFILE', '')) / '.bridge-server'
+            else:
+                self.config_dir = Path.home() / '.bridge-server'
+            self.config_dir.mkdir(parents=True, exist_ok=True)
+        
         if self.env_path is None:
             self.env_path = self.config_dir / '.env'
         
