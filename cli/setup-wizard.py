@@ -69,7 +69,8 @@ class SetupWizard:
             },
             'auth': {
                 'api_keys': []  # 用户侧 API Keys
-            }
+            },
+            'scenarios': {}  # 场景化模型配置
         }
         
         self.config_dir: Optional[Path] = None
@@ -85,6 +86,9 @@ class SetupWizard:
             
             # 2. 配置提供商和模型
             self._configure_providers()
+            
+            # 2.5. 配置场景化模型
+            self._configure_scenarios()
             
             # 3. 选择路由策略
             self._select_routing()
@@ -118,6 +122,7 @@ class SetupWizard:
         print(f"\n新功能：")
         print(f"  ✅ 支持配置多个模型/提供商")
         print(f"  ✅ 支持自定义 Provider (Base URL + 模型)")
+        print(f"  ✅ 场景化模型推荐 (Coding/Writing/Search/Summary)")
         print(f"  ✅ 自动选择路由策略")
         print(f"  ✅ 配置完成后自动启动服务")
         print(f"  ✅ 生成用户侧 API Key 和连接信息")
@@ -125,7 +130,7 @@ class SetupWizard:
     
     def _select_mode(self):
         """选择配置模式"""
-        print(f"\n{Colors.BOLD}📋 步骤 1/5: 选择配置模式{Colors.ENDC}")
+        print(f"\n{Colors.BOLD}📋 步骤 1/6: 选择配置模式{Colors.ENDC}")
         print(f"{'-'*60}\n")
         
         print("请选择配置模式：")
@@ -234,6 +239,94 @@ class SetupWizard:
                     print(f"{Colors.RED}请输入 1-{len(providers_list)} 之间的数字{Colors.ENDC}")
             except EOFError:
                 sys.exit(0)
+    
+    def _configure_scenarios(self):
+        """配置场景化模型"""
+        print(f"\n{Colors.BOLD}🎯 步骤 3/6: 配置场景化模型{Colors.ENDC}")
+        print(f"{'-'*60}\n")
+        
+        print("Bridge Server 支持根据不同使用场景自动选择最优模型：\n")
+        
+        # 预定义场景推荐
+        scenarios = {
+            'coding': {
+                'name': '💻 编程辅助',
+                'description': '代码生成、调试、解释',
+                'recommended': ['qwen-coder', 'gpt-4', 'claude-3.5-sonnet']
+            },
+            'writing': {
+                'name': '✍️ 写作创作',
+                'description': '文章、邮件、文案写作',
+                'recommended': ['qwen-plus', 'gpt-4', 'claude-3-opus']
+            },
+            'search': {
+                'name': '🔍 搜索分析',
+                'description': '信息检索、数据分析',
+                'recommended': ['qwen-max', 'gpt-4-turbo']
+            },
+            'summary': {
+                'name': '📝 摘要总结',
+                'description': '长文摘要、会议纪要',
+                'recommended': ['qwen-turbo', 'gpt-3.5-turbo']
+            },
+            'chat': {
+                'name': '💬 日常对话',
+                'description': '聊天、问答、娱乐',
+                'recommended': ['qwen-plus', 'gpt-3.5-turbo']
+            },
+            'translation': {
+                'name': '🌐 翻译',
+                'description': '多语言互译',
+                'recommended': ['qwen-max', 'gpt-4']
+            }
+        }
+        
+        # 显示场景列表
+        print("可用场景：")
+        scenario_list = list(scenarios.values())
+        for i, s in enumerate(scenario_list, 1):
+            print(f"  {i}. {s['name']} - {s['description']}")
+        
+        print(f"\n{Colors.CYAN}提示：可以为每个场景指定不同的模型{Colors.ENDC}")
+        print(f"      回车跳过表示使用默认配置\n")
+        
+        # 询问是否配置场景
+        use_scenarios = input("是否配置场景化模型？[Y/n]: ").strip().lower()
+        if use_scenarios == 'n':
+            print(f"\n{Colors.YELLOW}⚠️  已跳过，所有请求将使用默认模型{Colors.ENDC}")
+            return
+        
+        # 配置每个场景
+        for key, scenario in scenarios.items():
+            print(f"\n{scenario['name']}:")
+            print(f"  推荐模型：{', '.join(scenario['recommended'])}")
+            
+            # 显示已配置的提供商和模型
+            if self.config['providers']:
+                available_models = []
+                for p in self.config['providers']:
+                    for m in p.get('models', []):
+                        available_models.append(m.get('id', m.get('name', '')))
+                
+                if available_models:
+                    print(f"  已配置模型：{', '.join(available_models[:5])}")
+                    if len(available_models) > 5:
+                        print(f"    ... 还有 {len(available_models) - 5} 个")
+            
+            model_choice = input(f"  为该场景指定模型 (回车=默认): ").strip()
+            
+            if model_choice:
+                self.config['scenarios'][key] = {
+                    'enabled': True,
+                    'model': model_choice,
+                    'description': scenario['description']
+                }
+                print(f"  ✅ 已配置：{scenario['name']} → {model_choice}")
+            else:
+                print(f"  ⏭️  跳过：{scenario['name']}")
+        
+        print(f"\n{Colors.GREEN}✅ 场景化模型配置完成！{Colors.ENDC}")
+        print(f"   已配置 {len(self.config['scenarios'])} 个场景")
     
     def _advanced_config(self):
         """高级配置"""
@@ -418,7 +511,7 @@ class SetupWizard:
     
     def _select_routing(self):
         """选择路由策略"""
-        print(f"\n{Colors.BOLD}🔀 步骤 3/5: 选择路由策略{Colors.ENDC}")
+        print(f"\n{Colors.BOLD}🔀 步骤 4/6: 选择路由策略{Colors.ENDC}")
         print(f"{'-'*60}\n")
         
         print("路由策略决定如何分发请求到多个模型：\n")
@@ -457,7 +550,7 @@ class SetupWizard:
     
     def _generate_auth(self):
         """生成用户侧认证信息"""
-        print(f"\n{Colors.BOLD}🔐 步骤 4/5: 生成认证信息{Colors.ENDC}")
+        print(f"\n{Colors.BOLD}🔐 步骤 5/6: 生成认证信息{Colors.ENDC}")
         print(f"{'-'*60}\n")
         
         # 生成用户侧 API Key
@@ -482,7 +575,7 @@ class SetupWizard:
     
     def _save_config(self):
         """保存配置文件"""
-        print(f"\n{Colors.BOLD}📁 步骤 5/6: 保存配置{Colors.ENDC}")
+        print(f"\n{Colors.BOLD}📁 步骤 6/6: 保存配置{Colors.ENDC}")
         print(f"{'-'*60}\n")
         
         # 确定配置目录
