@@ -78,21 +78,31 @@ def verify_token(authorization: Optional[str] = Header(None)) -> bool:
             # 继续尝试 API Key 验证
 
     # 尝试 API Key 验证
-    auth_tokens = auth_config.get("api_keys", [])
+    auth_keys = auth_config.get("api_keys", [])
     
     # 兼容旧配置（server.auth_tokens）
-    if not auth_tokens:
-        auth_tokens = config.get("server", {}).get("auth_tokens", [])
-
+    if not auth_keys:
+        auth_keys = config.get("server", {}).get("auth_tokens", [])
+    
     # 🔒 安全修复：如果没有配置 Tokens，拒绝所有请求
-    if not auth_tokens:
+    if not auth_keys:
         logger.critical("未配置 auth_tokens，拒绝所有请求 - 请在 config.yaml 中配置")
         raise HTTPException(
             status_code=503, detail="服务未配置认证，请联系管理员配置 auth_tokens"
         )
-
+    
+    # 提取 API Key 列表（支持新旧格式）
+    valid_keys = []
+    for key_item in auth_keys:
+        if isinstance(key_item, dict):
+            # 新格式：{'key': 'sk-xxx', 'name': '...'}
+            valid_keys.append(key_item.get('key', ''))
+        else:
+            # 旧格式：直接是字符串
+            valid_keys.append(key_item)
+    
     # 验证 API Key
-    if token in auth_tokens:
+    if token in valid_keys:
         logger.info("API Key 验证成功")
         return True
 
