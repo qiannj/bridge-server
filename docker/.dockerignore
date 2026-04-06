@@ -1,0 +1,47 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# 文档
+*.md
+!README.md
+docs/
+
+# 脚本
+scripts/
+*.sh
+
+# 配置示例
+config.yaml.example
+.env.example
+
+# 测试
+tests/
+*.pyc
+__pycache__/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 日志
+*.log
+logs/
+
+# 数据
+data/
+
+# 备份
+*.bak
+*.backup
+*.tar.gz
+
+# Docker 构建产物
+*.tar

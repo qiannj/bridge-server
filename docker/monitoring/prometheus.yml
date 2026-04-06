@@ -1,0 +1,12 @@
+# Bridge Server Prometheus 监控配置
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'bridge-server'
+    static_configs:
+      - targets: ['bridge-server:8080']
+    metrics_path: '/metrics'
+    scrape_interval: 10s

@@ -1,0 +1,143 @@
+version: '3.8'
+
+# Bridge Server Docker Compose 配置
+
+services:
+  # ============ 主服务 ============
+  bridge-server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: bridge-server:1.5.3
+    container_name: bridge-server
+    restart: unless-stopped
+    
+    # 端口映射（默认 19377）
+    ports:
+      - "${BRIDGE_PORT:-19377}:19377"
+    
+    # 环境变量
+    environment:
+      # API Keys（从 .env 文件读取）
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
+      - MOONSHOT_API_KEY=${MOONSHOT_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - MINIMAX_API_KEY=${MINIMAX_API_KEY:-}
+      
+      # 服务器配置
+      - BRIDGE_HOST=0.0.0.0
+      - BRIDGE_PORT=19377
+      - BRIDGE_DEBUG=false
+      
+      # 日志配置
+      - LOG_LEVEL=INFO
+    
+    # 挂载配置（使用用户目录）
+    volumes:
+      # 配置文件
+      - ./config:/home/bridge/.bridge-server:rw
+      # 日志文件
+      - ./logs:/home/bridge/.local/var/log/bridge-server
+      # 用量数据
+      - ./data:/home/bridge/.bridge-server/data
+    
+    # 资源限制
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    
+    # 网络配置
+    networks:
+      - bridge-network
+    
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8080/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    # 日志配置
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+    # 安全配置
+    security_opt:
+      - no-new-privileges:true
+    read_only: false
+    tmpfs:
+      - /tmp:size=100M
+
+  # ============ 可选：Redis 缓存（用于速率限制） ============
+  # 如果启用 Redis，需要在配置文件中设置 rate_limiting.storage=redis
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: bridge-redis
+  #   restart: unless-stopped
+  #   volumes:
+  #     - redis-data:/data
+  #   networks:
+  #     - bridge-network
+  #   command: redis-server --appendonly yes
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         cpus: '0.5'
+  #         memory: 256M
+
+  # ============ 可选：Prometheus 监控 ============
+  # prometheus:
+  #   image: prom/prometheus:latest
+  #   container_name: bridge-prometheus
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+  #     - prometheus-data:/prometheus
+  #   command:
+  #     - '--config.file=/etc/prometheus/prometheus.yml'
+  #     - '--storage.tsdb.path=/prometheus'
+  #   ports:
+  #     - "9090:9090"
+  #   networks:
+  #     - bridge-network
+  #   depends_on:
+  #     - bridge-server
+
+  # ============ 可选：Grafana 可视化 ============
+  # grafana:
+  #   image: grafana/grafana:latest
+  #   container_name: bridge-grafana
+  #   restart: unless-stopped
+  #   environment:
+  #     - GF_SECURITY_ADMIN_PASSWORD=admin
+  #   volumes:
+  #     - grafana-data:/var/lib/grafana
+  #   ports:
+  #     - "3000:3000"
+  #   networks:
+  #     - bridge-network
+  #   depends_on:
+  #     - prometheus
+
+# 网络配置
+networks:
+  bridge-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+# 数据卷（可选组件使用）
+# volumes:
+#   redis-data:
+#   prometheus-data:
+#   grafana-data:

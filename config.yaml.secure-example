@@ -1,0 +1,160 @@
+# Bridge Server 安全配置模板
+# 复制此文件为 ~/.bridge-server/config.yaml 并修改
+# 🔒 安全：复制后立即 chmod 600 ~/.bridge-server/config.yaml
+
+version: "1.0.0"
+
+# =============================================================================
+# 🖥️ 服务器配置
+# =============================================================================
+server:
+  host: 127.0.0.1  # 🔒 安全：仅监听本地
+  port: 19377
+  debug: false     # 🔒 安全：生产环境禁用
+  
+  # =============================================================================
+  # 🔒 安全：认证 Tokens（必填！）
+  # =============================================================================
+  # 生成随机 token: openssl rand -hex 32
+  auth_tokens:
+    - "REPLACE_WITH_RANDOM_TOKEN_1"
+    - "REPLACE_WITH_RANDOM_TOKEN_2"  # 可配置多个
+  
+  # =============================================================================
+  # 🔒 安全：CORS 配置（默认禁止所有）
+  # =============================================================================
+  # cors_origins: []  # 空列表 = 禁止所有跨域请求
+  # 如需启用，取消注释并修改：
+  # cors_origins:
+  #   - "https://your-domain.com"
+
+# =============================================================================
+# 🔐 认证配置
+# =============================================================================
+auth:
+  # 🔒 安全：JWT 密钥（必填！）
+  # 生成：openssl rand -hex 32
+  jwt_secret: "REPLACE_WITH_RANDOM_JWT_SECRET"
+  
+  # 🔒 安全：API Keys（可选，用于服务端对服务端）
+  api_keys:
+    - "REPLACE_WITH_RANDOM_API_KEY_1"
+  
+  # 🔒 安全：Token 过期时间
+  token_expiry:
+    access_token: 7d    # 访问令牌 7 天
+    refresh_token: 30d  # 刷新令牌 30 天
+
+# =============================================================================
+# ⚡ 速率限制
+# =============================================================================
+rate_limit:
+  enabled: true
+  requests_per_minute: 30   # 每分钟最多 30 次
+  requests_per_hour: 500    # 每小时最多 500 次
+  requests_per_second: 10   # 每秒最多 10 次
+
+# =============================================================================
+# 🤖 模型提供商配置
+# =============================================================================
+providers:
+  # 阿里云百炼（推荐）
+  dashscope:
+    enabled: true
+    provider: dashscope
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    # 🔒 安全：使用环境变量存储 API Key
+    api_key_env: DASHSCOPE_API_KEY
+    models:
+      qwen3.5-flash:
+        cost: 0.002
+        use_case: 简单任务
+      qwen3.5-plus:
+        cost: 0.004
+        use_case: 通用任务
+      qwen3-max:
+        cost: 0.02
+        use_case: 复杂推理
+      qwen3-coder-plus:
+        cost: 0.008
+        use_case: 代码生成
+
+  # Moonshot (Kimi)
+  moonshot:
+    enabled: false
+    provider: moonshot
+    base_url: https://api.moonshot.cn/v1
+    api_key_env: MOONSHOT_API_KEY
+    models:
+      kimi-chat:
+        cost: 0.012
+        use_case: 长文本
+      kimi-k2.5:
+        cost: 0.025
+        use_case: 创意写作
+
+  # OpenAI
+  openai:
+    enabled: false
+    provider: openai
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+    models:
+      gpt-3.5-turbo:
+        cost: 0.002
+        use_case: 简单任务
+      gpt-4-turbo:
+        cost: 0.01
+        use_case: 复杂任务
+      gpt-4o:
+        cost: 0.015
+        use_case: 多模态
+
+  # MiniMax
+  minimax:
+    enabled: false
+    provider: minimax
+    base_url: https://api.minimax.chat/v1
+    api_key_env: MINIMAX_API_KEY
+    models:
+      MiniMax-M2.5:
+        cost: 0.005
+        use_case: 通用任务
+
+# =============================================================================
+# 💰 预算控制
+# =============================================================================
+budget:
+  enabled: false
+  daily_limit: 50      # 每日预算
+  monthly_limit: 1000  # 每月预算
+  over_budget_action: downgrade  # downgrade | stop | alert
+
+# =============================================================================
+# 📝 日志配置
+# =============================================================================
+logging:
+  # 🔒 安全：生产环境使用 WARNING
+  level: WARNING  # DEBUG | INFO | WARNING | ERROR
+  file: ~/.bridge-server/bridge-server.log
+  
+  # 🔒 安全：审计日志（记录所有认证事件）
+  audit_enabled: true
+  audit_file: ~/.bridge-server/audit.log
+
+# =============================================================================
+# 🗄️ 数据库配置（可选）
+# =============================================================================
+database:
+  # SQLite（默认，适合单机）
+  url: sqlite:///./bridge_server.db
+  
+  # MySQL（高并发场景）
+  # url: mysql+mysqlconnector://user:pass@localhost:3306/bridge_server
+
+# =============================================================================
+# 📊 Redis 配置（可选，用于高并发）
+# =============================================================================
+redis:
+  enabled: false
+  url: redis://localhost:6379

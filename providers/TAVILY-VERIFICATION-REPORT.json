@@ -1,0 +1,731 @@
+{
+  "timestamp": "2026-04-05T00:16:45.377860",
+  "method": "tavily_search",
+  "total_providers": 15,
+  "success_count": 15,
+  "results": [
+    {
+      "provider": "dashscope",
+      "status": "success",
+      "search_query": "阿里云通义千问 dashscope 模型列表 价格 2024 2025 2026",
+      "found_models": [
+        "qwen2.5-72b-instruct",
+        "qwen3.6-plus-2026-04-02",
+        "qwen3.5-flash-2026-02-23",
+        "qwen3-tts-vd-2026-01-26",
+        "qwen3-tts-vc-2026-01-22",
+        "qwen-turbo模型",
+        "qwen-plus",
+        "qwen3.6-plus",
+        "qwen-image-max-2025-12-30",
+        "qwen-long-0125",
+        "qwen2.5-7B",
+        "qwen-turbo-0428",
+        "qwen3-tts-instruct-flash-2026-01-26",
+        "qwen2.5-7b-instruct",
+        "qwen-turbo-latest",
+        "qwen-vl-plus-2025-01-25",
+        "qwen2-vl-72b-instruct模型的输入价格为0.016元",
+        "qwen-image-max",
+        "qwen2.5-32b-instruct",
+        "qwen2.5-3b-instruct"
+      ],
+      "expected_models": [
+        "qwen3-max",
+        "qwen3.5-flash",
+        "qwen3-coder-plus"
+      ],
+      "matched": [
+        "qwen3.5-flash"
+      ],
+      "missing": [
+        "qwen3-max",
+        "qwen3-coder-plus"
+      ],
+      "extra": [
+        "qwen2.5-72b-instruct",
+        "qwen3.6-plus-2026-04-02",
+        "qwen3.5-flash-2026-02-23",
+        "qwen3-tts-vd-2026-01-26",
+        "qwen3-tts-vc-2026-01-22",
+        "qwen-turbo模型",
+        "qwen-plus",
+        "qwen3.6-plus",
+        "qwen-image-max-2025-12-30",
+        "qwen-long-0125"
+      ],
+      "official_urls": [
+        "https://help.aliyun.com/zh/model-studio/models",
+        "https://help.aliyun.com/zh/model-studio/model-pricing",
+        "https://help.aliyun.com/zh/model-studio/model-release-notes",
+        "https://help.aliyun.com/zh/model-studio/rate-limit"
+      ],
+      "pricing_samples": {},
+      "timestamp": "2026-04-05T00:16:30.655384"
+    },
+    {
+      "provider": "moonshot",
+      "status": "success",
+      "search_query": "月之暗面 Kimi 模型 价格 2024 2025 2026 moonshot",
+      "found_models": [],
+      "expected_models": [
+        "moonshot-v1-8k",
+        "moonshot-v1-32k",
+        "moonshot-v1-128k"
+      ],
+      "matched": [],
+      "missing": [
+        "moonshot-v1-8k",
+        "moonshot-v1-32k",
+        "moonshot-v1-128k"
+      ],
+      "extra": [],
+      "official_urls": [],
+      "pricing_samples": {},
+      "timestamp": "2026-04-05T00:16:29.394043"
+    },
+    {
+      "provider": "deepseek",
+      "status": "success",
+      "search_query": "DeepSeek 模型 价格 2024 2025 2026 deepseek-chat",
+      "found_models": [],
+      "expected_models": [
+        "deepseek-chat",
+        "deepseek-coder"
+      ],
+      "matched": [],
+      "missing": [
+        "deepseek-chat",
+        "deepseek-coder"
+      ],
+      "extra": [],
+      "official_urls": [],
+      "pricing_samples": {
+        "https://www.nxcode.io/zh/resources/news/deepseek-api-pricing-complete-guide-2026": [
+          "$0.28",
+          "$0.42",
+          "$0.028",
+          "$8",
+          "$0.55"
+        ],
+        "https://api-docs.deepseek.com/quick_start/pricing": [
+          "$0.028",
+          "$0.28",
+          "$0.42"
+        ]
+      },
+      "timestamp": "2026-04-05T00:16:30.250374"
+    },
+    {
+      "provider": "minimax",
+      "status": "success",
+      "search_query": "MiniMax API models pricing 2024 2025 2026",
+      "found_models": [],
+      "expected_models": [
+        "abab6.5s-chat",
+        "abab6.5t-chat"
+      ],
+      "matched": [],
+      "missing": [
+        "abab6.5s-chat",
+        "abab6.5t-chat"
+      ],
+      "extra": [],
+      "official_urls": [],
+      "pricing_samples": {
+        "https://saketposwal.com/news/ai-model-pricing-comparison-2026/": [
+          "$5.00",
+          "$25.00",
+          "$15.00",
+          "$3.00",
+          "$15.00"
+        ],
+        "https://www.verdent.ai/guides/minimax-m2-5-pricing": [
+          "$0.15",
+          "$1.20",
+          "$0.30",
+          "$2.40",
+          "$10"
+        ],
+        "https://pricepertoken.com/pricing-page/model/minimax-minimax-m2": [
+          "$0.255",
+          "$1.00",
+          "$0.255",
+          "$1.00",
+          "$0.255"
+        ],
+        "https://pricepertoken.com/pricing-page/model/minimax-minimax-m2-her": [
+          "$0.300",
+          "$1.20",
+          "$0.300",
+          "$0.300",
+          "$1.20"
+        ],
+        "https://openrouter.ai/minimax/minimax-m1": [
+          "$0.40",
+          "$2.20"
+        ]
+      },
+      "timestamp": "2026-04-05T00:16:32.518039"
+    },
+    {
+      "provider": "zhipu",
+      "status": "success",
+      "search_query": "智谱 AI API models pricing 2024 2025 2026",
+      "found_models": [],
+      "expected_models": [
+        "glm-4",
+        "glm-4-flash"
+      ],
+      "matched": [],
+      "missing": [
+        "glm-4",
+        "glm-4-flash"
+      ],
+      "extra": [],
+      "official_urls": [],
+      "pricing_samples": {
+        "https://intuitionlabs.ai/articles/ai-api-pricing-comparison-grok-gemini-openai-claude": [
+          "$20",
+          "$100",
+          "$200",
+          "$1",
+          "$5"
+        ],
+        "https://open.bigmodel.cn/pricing": [
+          "¥5",
+          "¥2.5",
+          "¥0.5",
+          "¥0.25",
+          "¥10"
+        ],
+        "https://www.tldl.io/resources/llm-api-pricing-2026": [
+          "$2.50",
+          "$150",
+          "$0.10",
+          "$0.40",
+          "$0.01"
+        ],
+        "https://github.com/tno367/bigmodel": [
+          "¥20",
+          "¥100",
+          "¥200",
+          "¥5",
+          "¥5"
+        ],
+        "https://futureagi.substack.com/p/top-11-llm-api-providers-in-2026": [
+          "$5",
+          "$25",
+          "$15",
+          "$75",
+          "$3"
+        ]
+      },
+      "timestamp": "2026-04-05T00:16:33.027101"
+    },
+    {
+      "provider": "baidu",
+      "status": "success",
+      "search_query": "百度文心 API models pricing 2024 2025 2026",
+      "found_models": [],
+      "expected_models": [
+        "ernie-4.0-8k",
+        "ernie-speed-128k"
+      ],
+      "matched": [],
+      "missing": [
+        "ernie-4.0-8k",
+        "ernie-speed-128k"
+      ],
+      "extra": [],
+      "official_urls": [],
+      "pricing_samples": {
+        "https://unifuncs.com/s/Rh3LOTV6": [
+          "$0.02",
+          "$0.02",
+          "$0.02"
+        ],
+        "https://unifuncs.com/s/KK0M0DdT": [
+          "$0.02",
+          "$5",
+          "$0.075",
+          "$0.30",
+          "$0.28"
+        ],
+        "https://doc.zhizengzeng.com/doc-3979947": [
+          "$15",
+          "$60",
+          "$150",
+          "$600",
+          "$3"
+        ],
+        "https://www.tldl.io/resources/llm-api-pricing-2026": [
+          "$0.02",
+          "$375",
+          "$0.10",
+          "$3.00",
+          "$0.075"
+        ],
+        "https://unifuncs.com/s/61xC8T9q": [
+          "$0.04",
+          "$0.05",
+          "$0.025",
+          "$0.003",
+          "$0.04"
+        ]
+      },
+      "timestamp": "2026-04-05T00:16:37.836764"
+    },
+    {
+      "provider": "tencent",
+      "status": "success",
+      "search_query": "腾讯混元 API models pricing 2024 2025 2026",
+      "found_models": [],
+      "expected_models": [
+        "hunyuan-pro",
+        "hunyuan-lite"
+      ],
+      "matched": [],
+      "missing": [
+        "hunyuan-pro",
+        "hunyuan-lite"
+      ],
+      "extra": [],
+      "official_urls": [],
+      "pricing_samples": {
+        "https://costgoat.com/pricing/gemini-api": [
+          "$1.00",
+          "$0.50",
+          "$1.00",
+          "$0.30",
+          "$0.30"
+        ],
+        "https://juejin.cn/post/7622590276741447680": [
+          "$2.5",
+          "$10",
+          "$12.5",
+          "$0.15",
+          "$0.6"
+        ]
+      },
+      "timestamp": "2026-04-05T00:16:38.018904"
+    },
+    {
+      "provider": "openai",
+      "status": "success",
+      "search_query": "OpenAI GPT models pricing 2024 2025 2026 gpt-4o",
+      "found_models": [
+        "gpt-4-mini"
+      ],
+      "expected_models": [
+        "gpt-4o",
+        "gpt-4o-mini",
+        "o1-preview",
+        "gpt-4-turbo"
+      ],
+      "matched": [],
+      "missing": [
+        "gpt-4o",
+        "gpt-4o-mini",
+        "o1-preview",
+        "gpt-4-turbo"
+      ],
+      "extra": [
+        "gpt-4-mini"
+      ],
+      "official_urls": [],
+      "pricing_samples": {
+        "https://designforonline.com/ai-models/openai-gpt-4o-extended/": [
+          "$6.00",
+          "$0.006000",
+          "$18.00",
+          "$0.018000",
+          "$6"
+        ],
+        "https://gptforwork.com/help/resources/pricing-and-billing/model-prices": [
+          "$3",
+          "$13",
+          "$30",
+          "$1",
+          "$6"
+        ],
+        "https://portkey.ai/models/openai": [
+          "$2.00",
+          "$2.00",
+          "$1.50",
+          "$2.00",
+          "$2.50"
+        ],
+        "https://www.metacto.com/blogs/unlocking-the-true-cost-of-openai-api-a-deep-dive-into-usage-integration-and-maintenance": [
+          "$2.00",
+          "$0.50",
+          "$8.00",
+          "$2.00",
+          "$0.50"
+        ],
+        "https://searchatlas.com/blog/what-is-gpt-4o/": [
+          "$20",
+          "$2.50",
+          "$0.60",
+          "$0.30",
+          "$2.40"
+        ]
+      },
+      "timestamp": "2026-04-05T00:16:35.750974"
+    },
+    {
+      "provider": "anthropic",
+      "status": "success",
+      "search_query": "Anthropic Claude models pricing 2024 2025 2026 claude-3-5-sonnet",
+      "found_models": [],
+      "expected_models": [
+        "claude-3-5-sonnet-20241022",
+        "claude-3-5-haiku-20241022",
+        "claude-3-opus-20240229"
+      ],
+      "matched": [],
+      "missing": [
+        "claude-3-5-sonnet-20241022",
+        "claude-3-5-haiku-20241022",
+        "claude-3-opus-20240229"
+      ],
+      "extra": [],
+      "official_urls": [],
+      "pricing_samples": {
+        "https://www.metacto.com/blogs/anthropic-api-pricing-a-full-breakdown-of-costs-and-integration": [
+          "$1",
+          "$5",
+          "$3",
+          "$15",
+          "$5"
+        ],
+        "https://www.silicondata.com/use-cases/anthropic-claude-api-pricing-2026/": [
+          "$1.00",
+          "$5.00",
+          "$20.00",
+          "$3.00",
+          "$15.00"
+        ],
+        "https://www.nops.io/blog/anthropic-api-pricing/": [
+          "$15",
+          "$75",
+          "$15",
+          "$75",
+          "$3"
+        ],
+        "https://www.ssdnodes.com/blog/claude-code-pricing-in-2026-every-plan-explained-pro-max-api-teams/": [
+          "$5",
+          "$10",
+          "$25",
+          "$37.50",
+          "$3"
+        ],
+        "https://www.helicone.ai/llm-cost/provider/anthropic/model/claude-3-5-sonnet-20241022": [
+          "$0.000875",
+          "$0.007",
+          "$0.0000875",
+          "$0.0007",
+          "$0.0007875"
+        ]
+      },
+      "timestamp": "2026-04-05T00:16:38.972643"
+    },
+    {
+      "provider": "google",
+      "status": "success",
+      "search_query": "Google Gemini models pricing 2024 2025 2026 gemini-1.5-pro",
+      "found_models": [],
+      "expected_models": [
+        "gemini-1.5-pro",
+        "gemini-1.5-flash"
+      ],
+      "matched": [],
+      "missing": [
+        "gemini-1.5-pro",
+        "gemini-1.5-flash"
+      ],
+      "extra": [],
+      "official_urls": [],
+      "pricing_samples": {
+        "https://www.metacto.com/blogs/the-true-cost-of-google-gemini-a-guide-to-api-pricing-and-integration": [
+          "$0.10",
+          "$4",
+          "$2.00",
+          "$4.00",
+          "$12.00"
+        ],
+        "https://juma.ai/blog/gemini-pricing": [
+          "$19.99",
+          "$20",
+          "$30",
+          "$19.99",
+          "$20"
+        ],
+        "https://www.finout.io/blog/gemini-pricing-in-2026": [
+          "$35",
+          "$25",
+          "$0.15",
+          "$0.30",
+          "$1.00"
+        ],
+        "https://cloud.google.com/vertex-ai/generative-ai/pricing": [
+          "$14",
+          "$0.00002",
+          "$0.00002",
+          "$0.00001875",
+          "$0.000002"
+        ],
+        "https://masterconcept.ai/blog/gemini-1-5-pro-1-5-flash-price-drop-down-with-more-updated-models/": [
+          "$2.50",
+          "$5.00",
+          "$0.075",
+          "$0.15",
+          "$10.00"
+        ]
+      },
+      "timestamp": "2026-04-05T00:16:40.923388"
+    },
+    {
+      "provider": "cohere",
+      "status": "success",
+      "search_query": "Cohere API models pricing 2024 2025 2026",
+      "found_models": [],
+      "expected_models": [
+        "command-r-plus",
+        "command-r"
+      ],
+      "matched": [],
+      "missing": [
+        "command-r-plus",
+        "command-r"
+      ],
+      "extra": [],
+      "official_urls": [],
+      "pricing_samples": {
+        "https://pricepertoken.com/pricing-page/provider/cohere": [
+          "$0.04",
+          "$0.15",
+          "$0.60",
+          "$2.50",
+          "$10.00"
+        ],
+        "https://pricepertoken.com/compare/provider/cohere-vs-google": [
+          "$2.00",
+          "$12.00",
+          "$0.65",
+          "$0.65",
+          "$0.50"
+        ],
+        "https://www.metacto.com/blogs/cohere-pricing-explained-a-deep-dive-into-integration-development-costs": [
+          "$0.50",
+          "$1.50",
+          "$3.00",
+          "$15.00",
+          "$1.00"
+        ],
+        "https://fueler.io/blog/cohere-usage-revenue-valuation-growth-statistics": [
+          "$210",
+          "$225",
+          "$100"
+        ],
+        "https://invertedstone.com/calculators/cohere-pricing": [
+          "$2.5000",
+          "$10.0000",
+          "$39",
+          "$19",
+          "$59"
+        ]
+      },
+      "timestamp": "2026-04-05T00:16:40.782030"
+    },
+    {
+      "provider": "ai21",
+      "status": "success",
+      "search_query": "AI21 Labs API models pricing 2024 2025 2026",
+      "found_models": [],
+      "expected_models": [
+        "jamba-1.5-large",
+        "jamba-1.5-mini"
+      ],
+      "matched": [],
+      "missing": [
+        "jamba-1.5-large",
+        "jamba-1.5-mini"
+      ],
+      "extra": [],
+      "official_urls": [],
+      "pricing_samples": {
+        "https://calculator.holori.com/llm": [
+          "$2.00",
+          "$8.00",
+          "$2.00",
+          "$8.00",
+          "$2.00"
+        ],
+        "https://research.contrary.com/company/ai21-labs": [
+          "$11",
+          "$53.4",
+          "$97.2",
+          "$155.2",
+          "$229.3"
+        ],
+        "https://www.tldl.io/resources/llm-api-pricing-2026": [
+          "$0.075",
+          "$0.30",
+          "$0.28",
+          "$0.42",
+          "$2.50"
+        ]
+      },
+      "timestamp": "2026-04-05T00:16:42.016355"
+    },
+    {
+      "provider": "mistral",
+      "status": "success",
+      "search_query": "Mistral AI models pricing 2024 2025 2026 mistral-large",
+      "found_models": [],
+      "expected_models": [
+        "mistral-large-latest",
+        "mistral-medium-latest",
+        "mistral-small-latest"
+      ],
+      "matched": [],
+      "missing": [
+        "mistral-large-latest",
+        "mistral-medium-latest",
+        "mistral-small-latest"
+      ],
+      "extra": [],
+      "official_urls": [],
+      "pricing_samples": {
+        "https://pricepertoken.com/pricing-page/model/mistral-ai-mistral-large-2512": [
+          "$0.500",
+          "$1.50",
+          "$0.500",
+          "$1.50",
+          "$0.050"
+        ],
+        "https://anotherwrapper.com/tools/llm-pricing/mistral-large-3": [
+          "$2.00",
+          "$5.00",
+          "$2.00",
+          "$5.00",
+          "$7.00"
+        ],
+        "https://www.helicone.ai/llm-cost/provider/mistral/model/mistral-large-latest": [
+          "$0.0008",
+          "$0.004",
+          "$0.00008",
+          "$0.0004",
+          "$0.00048"
+        ],
+        "https://designforonline.com/ai-models/mistral-large-2407/": [
+          "$2.00",
+          "$0.002000",
+          "$6.00",
+          "$0.006000"
+        ]
+      },
+      "timestamp": "2026-04-05T00:16:43.784582"
+    },
+    {
+      "provider": "alephalpha",
+      "status": "success",
+      "search_query": "Aleph Alpha API models pricing 2024 2025 2026",
+      "found_models": [],
+      "expected_models": [
+        "luminous-supreme",
+        "luminous-extended"
+      ],
+      "matched": [],
+      "missing": [
+        "luminous-supreme",
+        "luminous-extended"
+      ],
+      "extra": [],
+      "official_urls": [],
+      "pricing_samples": {
+        "https://landscape.brxnd.ai/companies/aleph-alpha": [
+          "€1.",
+          "$0.03000",
+          "$0.04500",
+          "$0.17500",
+          "$0.03024"
+        ],
+        "https://www.ainvest.com/news/alphabet-api-pricing-shift-flow-driven-analysis-gemini-update-2604/": [
+          "$287.56",
+          "$316.12",
+          "$469.89"
+        ]
+      },
+      "timestamp": "2026-04-05T00:16:45.236261"
+    },
+    {
+      "provider": "yi",
+      "status": "success",
+      "search_query": "01.AI API models pricing 2024 2025 2026",
+      "found_models": [],
+      "expected_models": [
+        "yi-large",
+        "yi-medium",
+        "yi-spark"
+      ],
+      "matched": [],
+      "missing": [
+        "yi-large",
+        "yi-medium",
+        "yi-spark"
+      ],
+      "extra": [],
+      "official_urls": [],
+      "pricing_samples": {
+        "https://intuitionlabs.ai/articles/ai-api-pricing-comparison-grok-gemini-openai-claude": [
+          "$20",
+          "$17",
+          "$100",
+          "$200",
+          "$200"
+        ],
+        "https://www.swfte.com/blog/ai-api-pricing-trends-2026": [
+          "$0.20",
+          "$0.50",
+          "$2.50",
+          "$0.15",
+          "$0.60"
+        ],
+        "https://zylo.com/blog/ai-cost/": [
+          "$3"
+        ],
+        "https://www.aimagicx.com/blog/llm-api-pricing-comparison-2026": [
+          "$2.00",
+          "$8.00",
+          "$0.40",
+          "$1.60",
+          "$0.10"
+        ]
+      },
+      "timestamp": "2026-04-05T00:16:45.377121"
+    }
+  ],
+  "summary": {
+    "total_models_expected": 37,
+    "total_models_matched": 1,
+    "providers_with_missing": [
+      "dashscope",
+      "moonshot",
+      "deepseek",
+      "minimax",
+      "zhipu",
+      "baidu",
+      "tencent",
+      "openai",
+      "anthropic",
+      "google",
+      "cohere",
+      "ai21",
+      "mistral",
+      "alephalpha",
+      "yi"
+    ]
+  }
+}

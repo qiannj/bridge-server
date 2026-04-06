@@ -1,0 +1,32 @@
+[Unit]
+Description=Bridge Server - LLM Model Router & API Gateway
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%I
+Group=%I
+WorkingDirectory=/opt/bridge-server/src
+Environment="PATH=/opt/bridge-server/venv/bin:/usr/local/bin:/usr/bin:/bin"
+EnvironmentFile=-/opt/bridge-server/config/.env
+ExecStart=/opt/bridge-server/venv/bin/python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8080 --workers 1
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bridge-server
+
+# 安全增强
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/bridge-server/logs /opt/bridge-server/config
+
+# 资源限制
+LimitNOFILE=65535
+LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target

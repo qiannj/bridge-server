@@ -1,0 +1,473 @@
+{
+  "errors": [],
+  "generated_at": "2026-04-05T13:47:31Z",
+  "metrics": {
+    "_totals": {
+      "CONFIDENCE.HIGH": 15,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 15,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 1739,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "app/auth.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 39,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "app/main.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 195,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "app/reloader.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 316,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "app/router.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 164,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "app/ssl_manager.py": {
+      "CONFIDENCE.HIGH": 15,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 15,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 444,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "providers/loader.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 342,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "services/usage.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 239,
+      "nosec": 0,
+      "skipped_tests": 0
+    }
+  },
+  "results": [
+    {
+      "code": "12 import sys\n13 import subprocess\n14 import logging\n",
+      "col_offset": 0,
+      "end_col_offset": 17,
+      "filename": "app/ssl_manager.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 78,
+        "link": "https://cwe.mitre.org/data/definitions/78.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Consider possible security implications associated with the subprocess module.",
+      "line_number": 13,
+      "line_range": [
+        13
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_imports.html#b404-import-subprocess",
+      "test_id": "B404",
+      "test_name": "blacklist"
+    },
+    {
+      "code": "105         try:\n106             result = subprocess.run(\n107                 cmd,\n108                 capture_output=True,\n109                 text=True,\n110                 timeout=120\n111             )\n112             \n",
+      "col_offset": 21,
+      "end_col_offset": 13,
+      "filename": "app/ssl_manager.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 78,
+        "link": "https://cwe.mitre.org/data/definitions/78.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "subprocess call - check for execution of untrusted input.",
+      "line_number": 106,
+      "line_range": [
+        106,
+        107,
+        108,
+        109,
+        110,
+        111
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html",
+      "test_id": "B603",
+      "test_name": "subprocess_without_shell_equals_true"
+    },
+    {
+      "code": "136         try:\n137             result = subprocess.run(\n138                 [\"certbot\", \"--version\"],\n139                 capture_output=True,\n140                 text=True\n141             )\n142             return result.returncode == 0\n",
+      "col_offset": 21,
+      "end_col_offset": 13,
+      "filename": "app/ssl_manager.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 78,
+        "link": "https://cwe.mitre.org/data/definitions/78.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Starting a process with a partial executable path",
+      "line_number": 137,
+      "line_range": [
+        137,
+        138,
+        139,
+        140,
+        141
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b607_start_process_with_partial_path.html",
+      "test_id": "B607",
+      "test_name": "start_process_with_partial_path"
+    },
+    {
+      "code": "136         try:\n137             result = subprocess.run(\n138                 [\"certbot\", \"--version\"],\n139                 capture_output=True,\n140                 text=True\n141             )\n142             return result.returncode == 0\n",
+      "col_offset": 21,
+      "end_col_offset": 13,
+      "filename": "app/ssl_manager.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 78,
+        "link": "https://cwe.mitre.org/data/definitions/78.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "subprocess call - check for execution of untrusted input.",
+      "line_number": 137,
+      "line_range": [
+        137,
+        138,
+        139,
+        140,
+        141
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html",
+      "test_id": "B603",
+      "test_name": "subprocess_without_shell_equals_true"
+    },
+    {
+      "code": "239         try:\n240             result = subprocess.run(\n241                 cmd,\n242                 capture_output=True,\n243                 text=True\n244             )\n245             \n",
+      "col_offset": 21,
+      "end_col_offset": 13,
+      "filename": "app/ssl_manager.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 78,
+        "link": "https://cwe.mitre.org/data/definitions/78.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "subprocess call - check for execution of untrusted input.",
+      "line_number": 240,
+      "line_range": [
+        240,
+        241,
+        242,
+        243,
+        244
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html",
+      "test_id": "B603",
+      "test_name": "subprocess_without_shell_equals_true"
+    },
+    {
+      "code": "263         try:\n264             result = subprocess.run(\n265                 [\"openssl\", \"x509\", \"-in\", str(cert_path), \"-noout\", \"-text\"],\n266                 capture_output=True,\n267                 text=True,\n268                 timeout=10\n269             )\n270             return result.returncode == 0\n",
+      "col_offset": 21,
+      "end_col_offset": 13,
+      "filename": "app/ssl_manager.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 78,
+        "link": "https://cwe.mitre.org/data/definitions/78.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Starting a process with a partial executable path",
+      "line_number": 264,
+      "line_range": [
+        264,
+        265,
+        266,
+        267,
+        268,
+        269
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b607_start_process_with_partial_path.html",
+      "test_id": "B607",
+      "test_name": "start_process_with_partial_path"
+    },
+    {
+      "code": "263         try:\n264             result = subprocess.run(\n265                 [\"openssl\", \"x509\", \"-in\", str(cert_path), \"-noout\", \"-text\"],\n266                 capture_output=True,\n267                 text=True,\n268                 timeout=10\n269             )\n270             return result.returncode == 0\n",
+      "col_offset": 21,
+      "end_col_offset": 13,
+      "filename": "app/ssl_manager.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 78,
+        "link": "https://cwe.mitre.org/data/definitions/78.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "subprocess call - check for execution of untrusted input.",
+      "line_number": 264,
+      "line_range": [
+        264,
+        265,
+        266,
+        267,
+        268,
+        269
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html",
+      "test_id": "B603",
+      "test_name": "subprocess_without_shell_equals_true"
+    },
+    {
+      "code": "277         try:\n278             result = subprocess.run(\n279                 [\"openssl\", \"rsa\", \"-in\", str(key_path), \"-check\", \"-noout\"],\n280                 capture_output=True,\n281                 text=True,\n282                 timeout=10\n283             )\n284             return result.returncode == 0\n",
+      "col_offset": 21,
+      "end_col_offset": 13,
+      "filename": "app/ssl_manager.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 78,
+        "link": "https://cwe.mitre.org/data/definitions/78.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Starting a process with a partial executable path",
+      "line_number": 278,
+      "line_range": [
+        278,
+        279,
+        280,
+        281,
+        282,
+        283
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b607_start_process_with_partial_path.html",
+      "test_id": "B607",
+      "test_name": "start_process_with_partial_path"
+    },
+    {
+      "code": "277         try:\n278             result = subprocess.run(\n279                 [\"openssl\", \"rsa\", \"-in\", str(key_path), \"-check\", \"-noout\"],\n280                 capture_output=True,\n281                 text=True,\n282                 timeout=10\n283             )\n284             return result.returncode == 0\n",
+      "col_offset": 21,
+      "end_col_offset": 13,
+      "filename": "app/ssl_manager.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 78,
+        "link": "https://cwe.mitre.org/data/definitions/78.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "subprocess call - check for execution of untrusted input.",
+      "line_number": 278,
+      "line_range": [
+        278,
+        279,
+        280,
+        281,
+        282,
+        283
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html",
+      "test_id": "B603",
+      "test_name": "subprocess_without_shell_equals_true"
+    },
+    {
+      "code": "292             # \u83b7\u53d6\u8bc1\u4e66 modulus\n293             cert_result = subprocess.run(\n294                 [\"openssl\", \"x509\", \"-noout\", \"-modulus\", \"-in\", str(cert_path)],\n295                 capture_output=True,\n296                 text=True\n297             )\n298             \n",
+      "col_offset": 26,
+      "end_col_offset": 13,
+      "filename": "app/ssl_manager.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 78,
+        "link": "https://cwe.mitre.org/data/definitions/78.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Starting a process with a partial executable path",
+      "line_number": 293,
+      "line_range": [
+        293,
+        294,
+        295,
+        296,
+        297
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b607_start_process_with_partial_path.html",
+      "test_id": "B607",
+      "test_name": "start_process_with_partial_path"
+    },
+    {
+      "code": "292             # \u83b7\u53d6\u8bc1\u4e66 modulus\n293             cert_result = subprocess.run(\n294                 [\"openssl\", \"x509\", \"-noout\", \"-modulus\", \"-in\", str(cert_path)],\n295                 capture_output=True,\n296                 text=True\n297             )\n298             \n",
+      "col_offset": 26,
+      "end_col_offset": 13,
+      "filename": "app/ssl_manager.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 78,
+        "link": "https://cwe.mitre.org/data/definitions/78.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "subprocess call - check for execution of untrusted input.",
+      "line_number": 293,
+      "line_range": [
+        293,
+        294,
+        295,
+        296,
+        297
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html",
+      "test_id": "B603",
+      "test_name": "subprocess_without_shell_equals_true"
+    },
+    {
+      "code": "299             # \u83b7\u53d6\u79c1\u94a5 modulus\n300             key_result = subprocess.run(\n301                 [\"openssl\", \"rsa\", \"-noout\", \"-modulus\", \"-in\", str(key_path)],\n302                 capture_output=True,\n303                 text=True\n304             )\n305             \n",
+      "col_offset": 25,
+      "end_col_offset": 13,
+      "filename": "app/ssl_manager.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 78,
+        "link": "https://cwe.mitre.org/data/definitions/78.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Starting a process with a partial executable path",
+      "line_number": 300,
+      "line_range": [
+        300,
+        301,
+        302,
+        303,
+        304
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b607_start_process_with_partial_path.html",
+      "test_id": "B607",
+      "test_name": "start_process_with_partial_path"
+    },
+    {
+      "code": "299             # \u83b7\u53d6\u79c1\u94a5 modulus\n300             key_result = subprocess.run(\n301                 [\"openssl\", \"rsa\", \"-noout\", \"-modulus\", \"-in\", str(key_path)],\n302                 capture_output=True,\n303                 text=True\n304             )\n305             \n",
+      "col_offset": 25,
+      "end_col_offset": 13,
+      "filename": "app/ssl_manager.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 78,
+        "link": "https://cwe.mitre.org/data/definitions/78.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "subprocess call - check for execution of untrusted input.",
+      "line_number": 300,
+      "line_range": [
+        300,
+        301,
+        302,
+        303,
+        304
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html",
+      "test_id": "B603",
+      "test_name": "subprocess_without_shell_equals_true"
+    },
+    {
+      "code": "332             # \u83b7\u53d6\u8bc1\u4e66\u4fe1\u606f\n333             result = subprocess.run(\n334                 [\"openssl\", \"x509\", \"-in\", str(cert_path), \"-noout\", \"-subject\", \"-issuer\", \"-dates\", \"-serial\"],\n335                 capture_output=True,\n336                 text=True\n337             )\n338             \n",
+      "col_offset": 21,
+      "end_col_offset": 13,
+      "filename": "app/ssl_manager.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 78,
+        "link": "https://cwe.mitre.org/data/definitions/78.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Starting a process with a partial executable path",
+      "line_number": 333,
+      "line_range": [
+        333,
+        334,
+        335,
+        336,
+        337
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b607_start_process_with_partial_path.html",
+      "test_id": "B607",
+      "test_name": "start_process_with_partial_path"
+    },
+    {
+      "code": "332             # \u83b7\u53d6\u8bc1\u4e66\u4fe1\u606f\n333             result = subprocess.run(\n334                 [\"openssl\", \"x509\", \"-in\", str(cert_path), \"-noout\", \"-subject\", \"-issuer\", \"-dates\", \"-serial\"],\n335                 capture_output=True,\n336                 text=True\n337             )\n338             \n",
+      "col_offset": 21,
+      "end_col_offset": 13,
+      "filename": "app/ssl_manager.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 78,
+        "link": "https://cwe.mitre.org/data/definitions/78.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "subprocess call - check for execution of untrusted input.",
+      "line_number": 333,
+      "line_range": [
+        333,
+        334,
+        335,
+        336,
+        337
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html",
+      "test_id": "B603",
+      "test_name": "subprocess_without_shell_equals_true"
+    }
+  ]
+}

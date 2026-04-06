@@ -1,0 +1,86 @@
+# Bridge Server Git Ignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 敏感信息
+.env
+*.pem
+*.key
+*.crt
+config.yaml
+secrets/
+
+# 日志
+*.log
+logs/
+/var/log/bridge-server/
+
+# 数据库
+*.db
+*.sqlite
+*.sqlite3
+
+# 测试
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# 构建
+dist/
+build/
+*.egg-info/
+*.egg
+
+# 临时文件
+tmp/
+temp/
+*.tmp
+*.bak
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# 文档（开发用）
+TEST-*.md
+FIX-*.md
+AUDIT-*.md
+GAP-ANALYSIS-*.md
+*-REPORT.md
+*-ANALYSIS.md
+BRD-*.md
+PRODUCT-*.md
+RELEASE-GAP-*.md
+COMPLETE-TEST-*.md
+COMPLETION-*.md
+CROSS-PLATFORM-*.md
+DEPENDENCY-*.md
+TESTING-STRATEGY.md
+UNCOVERED-USE-CASES-*.md
+README-TESTING.md
+
+# 旧版本文档
+CHANGELOG-1.*.md
+RELEASE-v1.*.md
+SECURITY-*.md
+TEST-AND-SECURITY-*.md

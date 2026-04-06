@@ -1,0 +1,143 @@
+version: '3.8'
+
+# Bridge Server 负载均衡部署配置
+# 使用方法:
+#   docker-compose -f docker-compose.lb.yml up -d --scale bridge-server=3
+
+services:
+  # Nginx 负载均衡器
+  nginx-lb:
+    image: nginx:alpine
+    container_name: bridge-nginx-lb
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/ssl/certs:/etc/nginx/ssl/certs:ro
+      - ./docker/ssl/keys:/etc/nginx/ssl/keys:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - bridge-server
+    networks:
+      - bridge-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+  
+  # Bridge Server（多实例）
+  bridge-server:
+    image: bridge-server:1.5.3
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: bridge-server
+    expose:
+      - "19377"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./logs:/app/logs
+      - bridge_data:/app/data
+    environment:
+      - ENV=production
+      - LOG_LEVEL=INFO
+      # 从 .env 文件加载
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    networks:
+      - bridge-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:19377/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    # 日志配置
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+  
+  # Redis（可选，用于会话共享）
+  redis:
+    image: redis:7-alpine
+    container_name: bridge-redis
+    expose:
+      - "6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - bridge-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    command: redis-server --appendonly yes
+  
+  # Prometheus 监控（可选）
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: bridge-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - bridge-network
+    restart: unless-stopped
+    depends_on:
+      - bridge-server
+  
+  # Grafana 可视化（可选）
+  grafana:
+    image: grafana/grafana:latest
+    container_name: bridge-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    networks:
+      - bridge-network
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+# 网络配置
+networks:
+  bridge-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+# 数据卷
+volumes:
+  nginx_logs:
+  bridge_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:

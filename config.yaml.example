@@ -1,0 +1,133 @@
+# Bridge Server 配置模板
+# 复制此文件为 ~/.bridge-server/config.yaml 并修改
+
+version: "1.0.0"
+
+# 服务器配置
+server:
+  host: 127.0.0.1
+  port: 19377  # 默认端口：19377
+  debug: false
+  
+  # 🔒 安全：认证 Tokens（必填！）
+  # ⚠️  首次启动时会自动生成随机 token，或手动修改为随机字符串
+  auth_tokens:
+    - "REPLACE_WITH_RANDOM_TOKEN"
+  
+  # 🔒 安全：CORS 配置
+  cors_origins:
+    - "http://localhost:3000"
+    - "http://localhost:8080"
+
+# 模型提供商配置
+providers:
+  # 阿里云百炼
+  dashscope:
+    enabled: true
+    provider: dashscope
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    # 🔒 安全：使用环境变量存储 API Key
+    api_key_env: DASHSCOPE_API_KEY
+    # 或者直接使用（不推荐）：
+    # api_key: sk-xxx
+    models:
+      qwen3.5-flash:
+        cost: 0.002  # 元/千 tokens
+        use_case: 简单任务
+      qwen3.5-plus:
+        cost: 0.004
+        use_case: 通用任务
+      qwen3-max:
+        cost: 0.02
+        use_case: 复杂推理
+      qwen3-coder-plus:
+        cost: 0.008
+        use_case: 代码生成
+
+  # Moonshot (Kimi)
+  moonshot:
+    enabled: true
+    provider: moonshot
+    base_url: https://api.moonshot.cn/v1
+    api_key: sk-xxx
+    models:
+      kimi-chat:
+        cost: 0.012
+        use_case: 长文本
+      kimi-k2.5:
+        cost: 0.025
+        use_case: 创意写作
+
+  # OpenAI
+  openai:
+    enabled: false
+    provider: openai
+    base_url: https://api.openai.com/v1
+    api_key: sk-xxx
+    models:
+      gpt-3.5-turbo:
+        cost: 0.002
+        use_case: 简单任务
+      gpt-4-turbo:
+        cost: 0.01
+        use_case: 复杂任务
+      gpt-4o:
+        cost: 0.015
+        use_case: 多模态
+
+  # MiniMax
+  minimax:
+    enabled: false
+    provider: minimax
+    base_url: https://api.minimax.io/v1
+    api_key: xxx
+    models:
+      MiniMax-M2.5:
+        cost: 0.005
+        use_case: 通用任务
+
+# 路由策略
+routing:
+  strategy: balanced  # balanced, cost-first, quality-first, custom
+  
+  # 自定义模型映射（当 strategy=custom 时使用）
+  model_mapping:
+    simple: qwen3.5-flash      # 简单问候
+    coding: qwen3-coder-plus   # 代码任务
+    writing: qwen3.5-plus      # 写作
+    analysis: qwen3.5-plus     # 分析
+    creative: kimi-k2.5        # 创意
+    complex: qwen3-max         # 复杂推理
+    general: qwen3.5-plus      # 默认
+
+# 预算控制
+budget:
+  enabled: false
+  daily_limit: 50      # 每日预算（元）
+  monthly_limit: 1000  # 每月预算（元）
+  over_budget_action: downgrade  # downgrade, stop, alert
+
+# 🔒 安全：速率限制配置
+rate_limiting:
+  enabled: true
+  default:
+    per_minute: 100
+    per_hour: 1000
+  endpoints:
+    /v1/chat/completions: 60/minute
+    /v1/completions: 60/minute
+    /health: 10/minute
+    /api/usage: 30/minute
+
+# 日志配置
+logging:
+  level: INFO
+  file: /var/log/bridge-server/bridge-server.log
+  max_size: 10MB
+  backup_count: 5
+
+# 监控配置
+metrics:
+  enabled: true
+  export_prometheus: false
+  prometheus_port: 9090
