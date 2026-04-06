@@ -318,6 +318,16 @@ class SetupWizard:
         print(f"  2. 使用自定义 API 端点")
         print(f"  3. 跳过（稍后手动配置）")
         
+        # Windows 兼容性：刷新输入缓冲区（修复 PSReadLine 粘贴问题）
+        if sys.platform == 'win32':
+            try:
+                import msvcrt
+                # 清空输入缓冲区
+                while msvcrt.kbhit():
+                    msvcrt.getch()
+            except ImportError:
+                pass
+        
         while True:
             try:
                 choice = input(f"\n请选择 [1-3]: ").strip()
@@ -328,6 +338,15 @@ class SetupWizard:
                     break
                 elif choice == '2':
                     # 自定义端点
+                    # 再次刷新缓冲区
+                    if sys.platform == 'win32':
+                        try:
+                            import msvcrt
+                            while msvcrt.kbhit():
+                                msvcrt.getch()
+                        except ImportError:
+                            pass
+                    
                     custom_endpoint = input("请输入自定义 API 端点 (回车跳过): ").strip()
                     custom_model = input("请输入自定义模型名称 (回车跳过): ").strip()
                     
