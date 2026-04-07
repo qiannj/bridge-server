@@ -12,6 +12,14 @@ import yaml
 from pathlib import Path
 import os
 
+# 提前导入 jwt 模块，避免 UnboundLocalError
+try:
+    import jwt
+    JWT_AVAILABLE = True
+except ImportError:
+    JWT_AVAILABLE = False
+    jwt = None  # 占位符
+
 logger = logging.getLogger(__name__)
 
 
@@ -49,33 +57,35 @@ def verify_token(authorization: Optional[str] = Header(None)) -> bool:
 
     # 🔒 安全：JWT 验证 - 强制要求配置密钥
     if token.count('.') >= 2:  # JWT 格式
-        try:
-            import jwt
-            secret_key = auth_config.get("jwt_secret")
-            
-            # 🔒 安全：如果没有配置密钥，拒绝 JWT 认证
-            if not secret_key:
-                logger.critical("未配置 jwt_secret，无法使用 JWT 认证")
-                raise HTTPException(
-                    status_code=503, 
-                    detail="服务未配置 jwt_secret，请在 config.yaml 中配置"
-                )
-            
-            payload = jwt.decode(token, secret_key, algorithms=["HS256"])
-            
-            # 验证 token 类型
-            if payload.get("type") == "access":
-                logger.info(f"JWT 验证成功 | user={payload.get('sub', 'unknown')}")
-                return True
-        except jwt.ExpiredSignatureError:
-            logger.warning("JWT Token 已过期")
-            raise HTTPException(status_code=401, detail="Token 已过期")
-        except jwt.InvalidTokenError:
-            logger.warning("JWT Token 无效")
-            # 继续尝试 API Key 验证
-        except Exception:
-            logger.warning("JWT 验证失败")
-            # 继续尝试 API Key 验证
+        if not JWT_AVAILABLE:
+            logger.warning("JWT 模块未安装，跳过 JWT 验证")
+        else:
+            try:
+                secret_key = auth_config.get("jwt_secret")
+                
+                # 🔒 安全：如果没有配置密钥，拒绝 JWT 认证
+                if not secret_key:
+                    logger.critical("未配置 jwt_secret，无法使用 JWT 认证")
+                    raise HTTPException(
+                        status_code=503, 
+                        detail="服务未配置 jwt_secret，请在 config.yaml 中配置"
+                    )
+                
+                payload = jwt.decode(token, secret_key, algorithms=["HS256"])
+                
+                # 验证 token 类型
+                if payload.get("type") == "access":
+                    logger.info(f"JWT 验证成功 | user={payload.get('sub', 'unknown')}")
+                    return True
+            except jwt.ExpiredSignatureError:
+                logger.warning("JWT Token 已过期")
+                raise HTTPException(status_code=401, detail="Token 已过期")
+            except jwt.InvalidTokenError:
+                logger.warning("JWT Token 无效")
+                # 继续尝试 API Key 验证
+            except Exception as e:
+                logger.warning(f"JWT 验证失败：{e}")
+                # 继续尝试 API Key 验证
 
     # 尝试 API Key 验证
     auth_keys = auth_config.get("api_keys", [])
@@ -152,6 +162,7 @@ def create_jwt_token(username: str, expires_days: int = 7) -> str:
         "jti": jti  # 唯一标识
     }
     
+    import jwt
     token = jwt.encode(to_encode, secret_key, algorithm="HS256")
     logger.info(f"创建 JWT Token | user={username} | expires={expire.isoformat()}")
     return token

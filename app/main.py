@@ -18,9 +18,6 @@ from app.auth import verify_token, get_current_user
 from app.router import route_model, call_llm
 from services.usage import record_usage, get_tracker
 
-# 导入 RESTful API 路由
-from app.api.v1 import router as api_v1_router
-
 # 🔒 安全：日志级别（从环境变量读取，默认 WARNING）
 log_level = os.getenv("LOG_LEVEL", "WARNING").upper()
 
@@ -85,9 +82,6 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
-# 注册 RESTful API 路由
-app.include_router(api_v1_router)
-
 # ============ 健康检查 ============
 
 
@@ -112,8 +106,16 @@ async def readiness_check():
         "providers": []
     }
     
-    # 检查 Provider 配置
-    providers = config.get("providers", {})
+    # 检查 Provider 配置（支持 list 和 dict 两种格式）
+    providers_raw = config.get("providers", {})
+    providers = {}
+    if isinstance(providers_raw, list):
+        for p in providers_raw:
+            name = p.get("name", "unknown")
+            providers[name] = p
+    else:
+        providers = providers_raw
+    
     for name, prov_config in providers.items():
         if prov_config.get("enabled", False):
             checks["providers"].append({
@@ -199,17 +201,16 @@ async def chat_completions(
         )
 
         # 调用模型
-        response = await call_llm(selected_model, request["messages"], config)
+        response = await call_llm(selected_model, req_dict["messages"], config)
 
         # 添加路由信息到响应
-        if "usage" in response:
-            response["usage"]["routing"] = {
-                "task_type": task_type,
-                "selected_model": selected_model,
-                "reason": reason,
-            }
-        
-        # 添加用户信息（用于审计）
+        if "usage" not in response:
+            response["usage"] = {}
+        response["usage"]["routing"] = {
+            "task_type": task_type,
+            "selected_model": selected_model,
+            "reason": reason,
+        }
         response["usage"]["user"] = current_user.get("username", "unknown")
 
         return response
@@ -250,7 +251,14 @@ async def completions(
 @app.get("/api/models")
 async def list_models():
     """列出所有可用模型"""
-    providers = config.get("providers", {})
+    providers_raw = config.get("providers", {})
+    providers = {}
+    if isinstance(providers_raw, list):
+        for p in providers_raw:
+            name = p.get("name", "unknown")
+            providers[name] = p
+    else:
+        providers = providers_raw
 
     models = []
     for provider_name, provider_config in providers.items():

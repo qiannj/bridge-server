@@ -142,32 +142,32 @@ def get_default_mapping(strategy: str) -> Dict[str, str]:
 
     if strategy == "cost-first":
         return {
-            "simple": "qwen3.5-flash",
+            "simple": "qwen3.5-plus",
             "coding": "qwen3.5-plus",
-            "writing": "qwen3.5-flash",
-            "analysis": "qwen3.5-flash",
+            "writing": "qwen3.5-plus",
+            "analysis": "qwen3.5-plus",
             "creative": "qwen3.5-plus",
             "complex": "qwen3.5-plus",
-            "general": "qwen3.5-flash",
+            "general": "qwen3.5-plus",
         }
     elif strategy == "quality-first":
         return {
             "simple": "qwen3.5-plus",
-            "coding": "qwen3-coder-plus",
+            "coding": "qwen3.5-plus",
             "writing": "qwen3.5-plus",
-            "analysis": "qwen3-max",
-            "creative": "kimi-k2.5",
-            "complex": "qwen3-max",
+            "analysis": "qwen3.5-plus",
+            "creative": "qwen3.5-plus",
+            "complex": "qwen3.5-plus",
             "general": "qwen3.5-plus",
         }
     else:  # balanced
         return {
-            "simple": "qwen3.5-flash",
-            "coding": "qwen3-coder-plus",
+            "simple": "qwen3.5-plus",
+            "coding": "qwen3.5-plus",
             "writing": "qwen3.5-plus",
             "analysis": "qwen3.5-plus",
-            "creative": "kimi-k2.5",
-            "complex": "qwen3-max",
+            "creative": "qwen3.5-plus",
+            "complex": "qwen3.5-plus",
             "general": "qwen3.5-plus",
         }
 
@@ -181,14 +181,15 @@ def find_full_model_id(model_name: str, config: dict) -> str:
     # 兼容新格式（list）
     if isinstance(providers, list):
         for provider_config in providers:
-            if not provider_config.get("enabled", True):  # 默认启用
+            # 默认启用（如果没有 enabled 字段）
+            if not provider_config.get("enabled", True):
                 continue
             
             models = provider_config.get("models", [])
             if isinstance(models, list):
                 for model in models:
                     model_id = model.get("id", "") if isinstance(model, dict) else str(model)
-                    if model_id == model_name:
+                    if model_id == model_name or model.get("name", "") == model_name:
                         provider_name = provider_config.get("name", "unknown")
                         return f"{provider_name}/{model_id}"
             elif isinstance(models, dict):
