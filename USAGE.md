@@ -1,53 +1,28 @@
-# 🚀 Bridge Server v2.1 快速使用指南
-
-## 📋 新增功能概览
-
-v2.1 版本优化了模型配置和使用体验：
-
-1. **✅ 场景化模型配置优化** - 从已配置模型中选择，不再手动输入
-2. **✅ 智能路由模式** - 客户端请求时支持 `model: "smart"` 启用智能路由
-3. **✅ 灵活模型指定** - 支持指定具体模型 ID 或使用智能路由
+# Bridge Server 使用指南
 
 ---
 
-## 🎯 使用场景
+## 📋 快速开始
 
-### 场景 1: 配置向导 - 选择场景化模型
+### 三种使用模式
 
-运行配置向导时，系统会自动列出所有已配置的模型供选择：
+Bridge Server v2.1 支持三种请求模式：
 
-```bash
-bridge-server setup
-```
-
-**配置界面示例：**
-
-```
-🎯 步骤 2/4: 配置场景化模型
-------------------------------------------------------------
-
-💻 编程辅助 (代码生成、调试):
-  可用模型：smart (智能路由), dashscope/qwen3.5-flash, dashscope/qwen3.5-plus...
-  选择模型 (输入 smart 或模型 ID，回车=smart): smart
-
-✍️ 写作创作 (文章、邮件):
-  可用模型：smart (智能路由), dashscope/qwen3.5-flash, dashscope/qwen3.5-plus...
-  选择模型 (输入 smart 或模型 ID，回车=smart): dashscope/qwen3.5-plus
-```
-
-**选项说明：**
-- **smart** - 智能路由（默认推荐），系统根据任务类型自动选择最优模型
-- **具体模型 ID** - 如 `dashscope/qwen3.5-plus`，固定使用该模型
+| 模式 | model 参数 | 说明 | 适用场景 |
+|------|-----------|------|---------|
+| **智能路由** | `"smart"` | 系统自动选择最优模型 | 日常使用（推荐） |
+| **指定模型** | `"provider/model-id"` | 使用指定模型 | 测试/特定需求 |
+| **默认策略** | 不传或空值 | 使用配置的 routing.strategy | 向后兼容 |
 
 ---
 
-### 场景 2: 客户端请求 - 三种模式
+## 🎯 使用模式详解
 
-#### 模式 A: 智能路由（推荐）⭐
+### 模式 A: 智能路由（推荐）⭐
 
 ```bash
 curl -X POST http://localhost:19377/v1/chat/completions \
-  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Authorization: Bearer your-token" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "smart",
@@ -56,9 +31,9 @@ curl -X POST http://localhost:19377/v1/chat/completions \
 ```
 
 **行为：**
-- 系统分析消息内容，识别任务类型（coding/writing/analysis 等）
-- 根据配置的场景化模型映射，自动选择最优模型
-- 响应中包含路由信息，方便追踪
+1. 系统分析消息内容，识别任务类型（coding/writing/analysis 等）
+2. 根据配置的场景化模型映射，自动选择最优模型
+3. 响应中包含路由信息，方便追踪
 
 **响应示例：**
 ```json
@@ -68,7 +43,7 @@ curl -X POST http://localhost:19377/v1/chat/completions \
     "routing": {
       "task_type": "coding",
       "selected_model": "dashscope/qwen3-coder-plus",
-      "reason": "用户指定：smart"
+      "reason": "智能路由：coding"
     }
   }
 }
@@ -76,11 +51,11 @@ curl -X POST http://localhost:19377/v1/chat/completions \
 
 ---
 
-#### 模式 B: 指定具体模型
+### 模式 B: 指定具体模型
 
 ```bash
 curl -X POST http://localhost:19377/v1/chat/completions \
-  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Authorization: Bearer your-token" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "dashscope/qwen3.5-plus",
@@ -100,11 +75,11 @@ curl -X POST http://localhost:19377/v1/chat/completions \
 
 ---
 
-#### 模式 C: 默认策略（不传 model）
+### 模式 C: 默认策略（不传 model）
 
 ```bash
 curl -X POST http://localhost:19377/v1/chat/completions \
-  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Authorization: Bearer your-token" \
   -H "Content-Type: application/json" \
   -d '{
     "messages": [{"role": "user", "content": "你好"}]
@@ -139,9 +114,9 @@ curl -X POST http://localhost:19377/v1/chat/completions \
 
 ---
 
-## 🔧 配置文件说明
+## 🔧 配置场景化模型
 
-### config.yaml - 场景化模型映射
+### config.yaml - 智能路由映射
 
 ```yaml
 routing:
@@ -158,18 +133,31 @@ routing:
     general: qwen3.5-plus      # 默认 → 通用模型
 ```
 
+### 任务类型识别关键词
+
+系统通过关键词匹配识别任务类型：
+
+| 任务类型 | 关键词 |
+|---------|--------|
+| **coding** | "代码"、"python"、"函数"、"算法"、"debug" |
+| **writing** | "写"、"文章"、"邮件"、"报告"、"文案" |
+| **analysis** | "分析"、"总结"、"对比"、"解释"、"为什么" |
+| **creative** | "创意"、"故事"、"设计"、"诗歌"、"想象" |
+| **complex** | "推理"、"证明"、"数学"、"逻辑"、"深入" |
+| **simple** | "你好"、"hi"、"hello"、"谢谢"、"再见" |
+
 ---
 
 ## 💡 最佳实践
 
-### 1. 开发环境
+### 日常使用
 
-```yaml
-# 使用智能路由，快速迭代
-model: "smart"
+```python
+# 推荐：始终使用 smart
+model = "smart"
 ```
 
-### 2. 生产环境
+### 生产环境
 
 ```yaml
 # 关键业务：指定最强模型
@@ -179,7 +167,7 @@ model: "dashscope/qwen3-max"
 model: "smart"
 ```
 
-### 3. 测试对比
+### 测试对比
 
 ```python
 # 对比不同模型效果
@@ -196,12 +184,30 @@ for model in models_to_test:
 
 ---
 
-## 🎛️ 配置向导 vs 手动配置
+## 🎛️ 配置方式
 
-| 方式 | 优点 | 适用场景 |
-|------|------|----------|
-| **配置向导** | 交互式、自动验证、防错 | 首次配置、修改场景模型 |
-| **手动编辑** | 灵活、批量修改、版本控制 | 高级用户、自动化部署 |
+### 配置向导（推荐）
+
+```bash
+python3 cli/setup-wizard.py
+```
+
+**优点：**
+- ✅ 交互式界面
+- ✅ 自动验证配置
+- ✅ 防止输入错误
+- ✅ 自动收集已配置模型
+
+### 手动编辑
+
+```bash
+vi ~/.bridge-server/config.yaml
+```
+
+**优点：**
+- ✅ 灵活定制
+- ✅ 批量修改
+- ✅ 版本控制
 
 **推荐：** 首次使用配置向导，后续微调手动编辑 config.yaml。
 
@@ -211,13 +217,7 @@ for model in models_to_test:
 
 ### Q1: smart 模式如何识别任务类型？
 
-系统通过关键词匹配识别：
-- **coding**: "代码"、"python"、"函数"、"算法"等
-- **writing**: "写"、"文章"、"邮件"、"报告"等
-- **analysis**: "分析"、"总结"、"对比"、"解释"等
-- **creative**: "创意"、"故事"、"设计"、"诗歌"等
-- **complex**: "推理"、"证明"、"数学"、"逻辑"等
-- **simple**: "你好"、"hi"、"谢谢"等
+系统通过关键词匹配识别任务类型（见上表）。支持中英文关键词。
 
 ### Q2: 如何自定义任务类型识别？
 
@@ -238,11 +238,67 @@ TASK_KEYWORDS = {
 2. 如果未配置，使用 `general` 默认模型
 3. 最后降级到 `qwen3.5-plus`
 
+### Q4: 如何查看路由决策日志？
+
+每个请求都会记录详细的路由日志：
+
+```
+⏱️ 性能 | 请求解析：0.82ms
+⏱️ 性能 | 路由决策：6.09ms | 任务类型=coding | 模型=dashscope/qwen3-coder-plus
+⏱️ 性能 | 总耗时：4689.47ms | LLM 调用：4682.06ms | 其他：7.41ms
+```
+
 ---
 
-## 🎉 总结
+## 🚀 高级功能
 
-**v2.1 核心改进：**
+### Stream 模式
+
+支持 SSE 流式响应：
+
+```bash
+curl -X POST http://localhost:19377/v1/chat/completions \
+  -H "Authorization: Bearer your-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "smart",
+    "messages": [...],
+    "stream": true
+  }'
+```
+
+**特性：**
+- 每 20 秒发送心跳防止超时
+- 支持最长 300 秒超时
+- 禁用 Nginx 缓冲
+
+### 自定义路由（JS 沙箱）
+
+允许用户编写自定义路由逻辑：
+
+```yaml
+routing:
+  strategy: custom
+  custom_routing_enabled: true
+  custom_route_code: |
+    def route(context):
+        message = context.get('message', '').lower()
+        if 'code' in message:
+            return {'model': 'qwen3-coder-plus', 'reason': '代码任务'}
+        else:
+            return {'model': 'qwen3.5-plus', 'reason': '通用任务'}
+```
+
+**安全特性：**
+- ✅ 禁止 `import` / `eval` / `exec`
+- ✅ 禁止文件系统访问
+- ✅ 禁止网络请求
+- ✅ 5 秒执行超时
+- ✅ 128MB 内存限制
+
+---
+
+## 📊 版本对比
 
 | 功能 | 旧版本 | v2.1 |
 |------|--------|------|
@@ -250,12 +306,9 @@ TASK_KEYWORDS = {
 | 客户端请求 | 固定模型或默认策略 | 支持 smart 智能路由 |
 | 路由透明度 | 日志查看 | 响应中直接返回路由信息 |
 | 配置体验 | 易出错 | 防错、引导式 |
-
-**推荐使用方式：**
-- 日常使用：`model: "smart"` - 让系统自动选择
-- 特殊需求：`model: "具体 ID"` - 精确控制
-- 遗留兼容：不传 model - 保持旧行为
+| Stream 模式 | ❌ | ✅ |
+| 性能追踪 | ❌ | ✅ |
 
 ---
 
-**祝您使用愉快！** 🎊
+**祝您使用愉快！**

@@ -76,26 +76,25 @@ POST /v1/chat/completions
 **每一分钱都花得明明白白！**
 
 ```bash
-# 实时查看用量
-$ bridge-server usage --today
+# API 查询用量
+GET /api/usage?period=today
 
-今日用量报告
-━━━━━━━━━━━━━━━━━━━━━━━
-总请求数：1,234
-总花费：¥12.34
-平均每次：¥0.01
-
-按模型分布：
-  qwen3.5-flash   800 次  ¥3.20  (26%)
-  qwen3.5-plus    300 次  ¥6.40  (52%)
-  qwen3-max       134 次  ¥2.74  (22%)
+# 响应示例
+{
+  "total_requests": 1234,
+  "total_cost": 12.34,
+  "models": {
+    "qwen3.5-flash": {"requests": 800, "cost": 3.20},
+    "qwen3.5-plus": {"requests": 300, "cost": 6.40}
+  }
+}
 ```
 
-**预算告警，再也不怕超支：**
-- 50% 使用量 → 邮件提醒
-- 80% 使用量 → 邮件 + 短信
-- 90% 使用量 → 全渠道告警
-- 100% 使用量 → 自动降级或暂停
+**预算控制：**
+- ✅ 实时用量追踪（按日/周/月）
+- ✅ 按模型和 Provider 统计
+- ✅ 预算检查 API（`GET /api/budget`）
+- ⚠️ 预算告警通知功能开发中
 
 ---
 
@@ -104,20 +103,20 @@ $ bridge-server usage --today
 **Linux / macOS / Windows 全支持！**
 
 ```bash
-# Linux/macOS
+# Docker Compose（推荐）
+git clone https://github.com/qiannj/bridge-server.git
+cd bridge-server
+docker compose up -d
+
+# Linux/macOS 直接运行
 curl -fsSL https://raw.githubusercontent.com/qiannj/bridge-server/main/install.sh | bash
 
 # Windows PowerShell
 Invoke-WebRequest -Uri https://raw.githubusercontent.com/qiannj/bridge-server/main/install.ps1 -OutFile install.ps1
-.\install.ps1
-
-# Docker（推荐）
-docker run -d -p 19377:19377 \
-  -v ~/.bridge-server:/root/.bridge-server \
-  bridgedev/bridge-server:latest
+.\\install.ps1
 ```
 
-**3 分钟完成部署，开箱即用！**
+**注意**: Docker 镜像发布计划中，当前使用 docker-compose 本地构建。
 
 ---
 
@@ -125,29 +124,76 @@ docker run -d -p 19377:19377 \
 
 ### 步骤 1: 安装
 
+**方式 A: Docker Compose（推荐）**
+
+```bash
+# 克隆仓库
+git clone https://github.com/qiannj/bridge-server.git
+cd bridge-server
+
+# 配置环境变量
+cp .env.example .env
+# 编辑 .env 填入你的 API Key
+
+# 启动服务
+docker compose up -d
+
+# 验证
+curl http://localhost:19377/health
+```
+
+**方式 B: 直接运行**
+
 ```bash
 # Linux/macOS
 curl -fsSL https://raw.githubusercontent.com/qiannj/bridge-server/main/install.sh | bash
 
 # Windows
-powershell -Command "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/qiannj/bridge-server/main/install.ps1' -OutFile 'install.ps1'; .\install.ps1"
+powershell -Command "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/qiannj/bridge-server/main/install.ps1' -OutFile 'install.ps1'; .\\install.ps1"
+```
+
+**方式 C: 手动部署**
+
+```bash
+# 1. 安装依赖
+pip install -r requirements.txt
+
+# 2. 配置
+cp config.yaml.example ~/.bridge-server/config.yaml
+# 编辑配置文件
+
+# 3. 启动
+python -m uvicorn app.main:app --host 127.0.0.1 --port 19377
 ```
 
 ### 步骤 2: 配置
 
 ```bash
 # 运行配置向导（交互式）
-bridge-server setup
+python3 cli/setup-wizard.py
 
 # 或手动配置
-vi ~/.bridge-server/.env
+vi ~/.bridge-server/config.yaml
 # 填入你的 API Key
 ```
+
+**配置向导功能**:
+- ✅ 交互式配置 Provider 和 API Key
+- ✅ 自动选择可用模型
+- ✅ 场景化模型映射配置
+- ✅ 自动生成安全 Token
 
 ### 步骤 3: 启动
 
 ```bash
-bridge-server start
+# Docker Compose 方式
+docker compose up -d
+
+# 或直接运行
+python3 -m uvicorn app.main:app --host 127.0.0.1 --port 19377
+
+# Systemd 方式（Linux）
+sudo systemctl start bridge-server
 ```
 
 ### 步骤 4: 测试
@@ -175,30 +221,31 @@ curl -X POST http://localhost:19377/v1/chat/completions \
 
 ---
 
-## 🛠️ 命令行工具
+## 🛠️ 管理接口
+
+Bridge Server 提供 REST API 进行管理操作：
 
 ```bash
-# 服务管理
-bridge-server start          # 启动服务
-bridge-server stop           # 停止服务
-bridge-server restart        # 重启服务
-bridge-server status         # 查看状态
-bridge-server logs           # 查看日志
+# 服务健康检查
+curl http://localhost:19377/health
 
-# 用量查询
-bridge-server usage --today  # 今日用量
-bridge-server usage --week   # 本周用量
-bridge-server usage --month  # 本月用量
+# 查看可用模型
+curl http://localhost:19377/api/models
 
-# 路由测试
-bridge-server routing-test "用 Python 写个快速排序"
-# 输出：将路由到 qwen3-coder-plus (代码任务)
+# 查看用量统计
+curl http://localhost:19377/api/usage?period=today
 
-# 配置管理
-bridge-server setup          # 配置向导
-bridge-server backup         # 备份配置
-bridge-server restore        # 恢复配置
+# 查看预算状态
+curl http://localhost:19377/api/budget
+
+# 查看路由配置
+curl http://localhost:19377/api/routing
+
+# 导出用量报告
+curl http://localhost:19377/api/export/usage?period=month\&format=json
 ```
+
+**命令行工具开发中** - 计划支持 `bridge-server start/stop/restart/status` 等命令。
 
 ---
 
@@ -246,26 +293,24 @@ budget:
 
 ---
 
-### 场景 3: 企业用户
+### 场景 3: 小型团队
 
-**问题**: 需要审计、权限控制、多团队管理
+**问题**: 需要简单的认证和用量追踪
 
 **Bridge Server 方案**:
 ```yaml
-# 多用户 + 权限控制
-users:
-  - name: team-a
-    token: token-abc
-    budget: 5000
-    models: [all]
-  
-  - name: team-b
-    token: token-xyz
-    budget: 2000
-    models: [qwen3.5-flash, qwen3.5-plus]  # 限制可用模型
+# 配置多个 API Key（单用户模式）
+auth:
+  api_keys:
+    - key: sk-team-a-xxx
+      name: team-a
+    - key: sk-team-b-xxx
+      name: team-b
 ```
 
-**收益**: 权限清晰，审计完整，成本分摊
+**收益**: 简单的 Key 管理，完整的用量追踪，成本分摊
+
+**多用户权限系统开发中** - 计划支持用户级预算限制和模型访问控制。
 
 ---
 
@@ -280,9 +325,11 @@ users:
 │              Bridge Server API Gateway                  │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐              │
 │  │   认证   │  │   路由   │  │  限流    │              │
+│  │ (JWT/Key)│  │(智能/JS) │  │(SlowAPI) │              │
 │  └──────────┘  └──────────┘  └──────────┘              │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐              │
 │  │  用量    │  │  预算    │  │  日志    │              │
+│  │(SQLite/DB)│  │  检查    │  │(性能追踪)│              │
 │  └──────────┘  └──────────┘  └──────────┘              │
 └─────────────────────────────────────────────────────────┘
                           ↓ ↓ ↓
@@ -293,19 +340,180 @@ users:
 
 **技术栈**:
 - 后端：FastAPI (Python 3.8+)
-- 数据库：SQLite (默认) / MySQL (可选)
-- 缓存：Redis (可选)
-- 部署：Docker / Systemd / Standalone
+- 数据库：SQLite (默认) / MySQL (可选，通过 DATABASE_URL 环境变量)
+- 认证：JWT + API Key
+- 限流：SlowAPI
+- 部署：Docker Compose / Systemd / Standalone
+
+**核心特性**:
+- ✅ 智能模型路由（6 种任务类型自动识别）
+- ✅ JS 沙箱自定义路由（安全隔离执行用户代码）
+- ✅ Stream 模式支持（20 秒心跳防止超时）
+- ✅ 高并发写入器（异步批量写入数据库）
+- ✅ 性能追踪日志（请求解析/路由决策/LLM 调用）
+- ✅ 双后端用量统计（文件/数据库自动切换）
+- ⚠️ Prometheus 监控（计划中）
+
+---
+
+## 📦 已实现功能详解
+
+### 1. 数据库后端支持
+
+Bridge Server 支持两种用量存储后端：
+
+**文件存储（默认）**:
+- 数据位置：`~/.bridge-server/usage.json`
+- 适合：个人使用、低并发场景
+- 无需额外配置
+
+**数据库存储（可选）**:
+- 支持：SQLite / MySQL / PostgreSQL
+- 配置：设置 `DATABASE_URL` 环境变量
+- 适合：高并发、多用户场景
+
+```bash
+# 启用数据库后端
+export DATABASE_URL=sqlite:///./bridge-server.db
+# 或
+export DATABASE_URL=mysql://user:pass@localhost/bridge_server
+```
+
+**高并发写入器**: `services/high_concurrency_writer.py` 提供异步批量写入，避免阻塞请求。
+
+---
+
+### 2. JS 沙箱自定义路由
+
+允许用户编写自定义路由逻辑，安全隔离执行：
+
+**配置方式** (`config.yaml`):
+```yaml
+routing:
+  strategy: custom
+  custom_routing_enabled: true
+  custom_route_code: |
+    # 你的自定义路由逻辑
+    def route(context):
+        message = context.get('message', '').lower()
+        if 'code' in message:
+            return {'model': 'qwen3-coder-plus', 'reason': '代码任务'}
+        else:
+            return {'model': 'qwen3.5-plus', 'reason': '通用任务'}
+```
+
+**安全特性**:
+- ✅ 禁止 `import` / `eval` / `exec`
+- ✅ 禁止文件系统访问
+- ✅ 禁止网络请求
+- ✅ 5 秒执行超时
+- ✅ 128MB 内存限制
+
+详见：`services/sandbox.py`
+
+---
+
+### 3. Stream 模式 + 心跳机制
+
+支持 SSE (Server-Sent Events) 流式响应，防止代理超时：
+
+**请求示例**:
+```bash
+curl -X POST http://localhost:19377/v1/chat/completions \
+  -H "Authorization: Bearer ***" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "smart", "messages": [...], "stream": true}'
+```
+
+**心跳机制**:
+- 每 20 秒发送 SSE 注释行 `: heartbeat`
+- 防止负载均衡/代理切断空闲连接
+- 支持最长 300 秒超时
+
+详见：`app/main.py:chat_completions_stream()`
+
+---
+
+### 4. 性能追踪日志
+
+每个请求自动记录 3 个阶段的耗时：
+
+```
+⏱️ 性能 | 请求解析：0.82ms
+⏱️ 性能 | 路由决策：6.09ms | 任务类型=general | 模型=aliyun-coding-plan/qwen3.5-plus
+⏱️ 性能 | 总耗时：4689.47ms | LLM 调用：4682.06ms | 其他：7.41ms
+```
+
+**追踪阶段**:
+1. 请求解析 - JSON 解析 + 参数验证
+2. 路由决策 - 任务识别 + 模型选择
+3. LLM 调用 - HTTP POST + 等待响应
+
+详见：`app/main.py:181-262`
+
+---
+
+### 5. 双后端用量统计
+
+自动检测并使用最佳存储后端：
+
+**自动切换逻辑**:
+```
+有 DATABASE_URL? 
+    ↓ 是
+使用数据库后端 (SQLAlchemy)
+    ↓ 失败
+降级到文件后端
+    ↓
+无 DATABASE_URL?
+    ↓
+使用文件后端 (JSON)
+```
+
+**统计维度**:
+- 按日/周/月/全部
+- 按模型汇总
+- 按 Provider 汇总
+- 每日明细
+- 成功率统计
+
+详见：`services/usage.py`
+
+---
+
+### 6. 多种认证方式
+
+支持两种认证方式：
+
+**Bearer Token** (推荐):
+```bash
+Authorization: Bearer sk-client-xxx
+```
+
+**X-API-Key 头**:
+```bash
+X-API-Key: sk-client-xxx
+```
+
+**Token 格式**:
+- API Key: 简单字符串
+- JWT: `xxx.xxx.xxx` 格式（3 段式）
+
+详见：`app/auth.py`
 
 ---
 
 ## 📚 文档
 
-- [🚀 快速开始](docs/QUICKSTART.md) - 3 分钟上手
-- [⚙️ 配置指南](docs/CONFIG.md) - 详细配置说明
-- [📖 API 参考](docs/API.md) - 完整 API 文档
-- [🧠 路由策略](docs/ROUTING.md) - 路由算法详解
-- [🔧 故障排查](docs/TROUBLESHOOTING.md) - 常见问题
+- [📖 使用指南](USAGE.md) - 完整的使用说明和最佳实践
+- [📥 安装指南](INSTALL.md) - 安装和部署指南
+- [📝 更新日志](CHANGELOG.md) - 版本变更历史
+- [📋 待办清单](TODO.md) - 计划实现的功能
+- [⚙️ 配置模板](config.yaml.example) - 配置示例
+- [🔒 安全策略](docs/SECURITY-POLICY.md) - 安全说明
+
+**历史归档**:
+- [docs-archive-history/](docs-archive-history/) - 旧版本文档归档
 
 ---
 
