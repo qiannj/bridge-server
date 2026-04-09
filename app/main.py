@@ -177,12 +177,17 @@ async def chat_completions(
     - complex: 复杂推理
     - general: 默认
     """
+    import time
+    perf_start = time.perf_counter()  # 🚀 性能追踪：请求开始
+    
     try:
         # 🔒 安全：输入验证
+        perf_parse = time.perf_counter()
         if not hasattr(request, "json"):
             req_dict = request if isinstance(request, dict) else {}
         else:
             req_dict = await request.json() if hasattr(request, "json") else {}
+        logger.info(f"⏱️ 性能 | 请求解析：{(time.perf_counter() - perf_parse) * 1000:.2f}ms")
 
         # 验证 messages 字段
         if "messages" not in req_dict or not req_dict["messages"]:
@@ -226,11 +231,9 @@ async def chat_completions(
         else:
             logger.info(f"收到请求 | user={current_user.get('username', 'unknown')} | text={text[:50]}... | 模式=默认")
 
+        perf_route = time.perf_counter()
         selected_model, task_type, reason = route_model(text, config, requested_model)
-
-        logger.info(
-            f"路由决策 | 任务类型={task_type} | 模型={selected_model} | 原因={reason}"
-        )
+        logger.info(f"⏱️ 性能 | 路由决策：{(time.perf_counter() - perf_route) * 1000:.2f}ms | 任务类型={task_type} | 模型={selected_model}")
 
         # 🚀 v2.1.1: 处理 stream 模式
         if stream:
@@ -240,8 +243,10 @@ async def chat_completions(
             )
 
         # 调用模型
+        perf_llm = time.perf_counter()
         response = await call_llm(selected_model, req_dict["messages"], config)
-
+        llm_duration = (time.perf_counter() - perf_llm) * 1000
+        
         # 添加路由信息到响应
         if "usage" not in response:
             response["usage"] = {}
@@ -251,6 +256,10 @@ async def chat_completions(
             "reason": reason,
         }
         response["usage"]["user"] = current_user.get("username", "unknown")
+        
+        # 🚀 性能追踪：总耗时
+        total_duration = (time.perf_counter() - perf_start) * 1000
+        logger.info(f"⏱️ 性能 | 总耗时：{total_duration:.2f}ms | LLM 调用：{llm_duration:.2f}ms | 其他：{total_duration - llm_duration:.2f}ms")
 
         return response
 
