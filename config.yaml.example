@@ -91,6 +91,9 @@ routing:
   strategy: balanced  # balanced, cost-first, quality-first, custom
   
   # 自定义模型映射（当 strategy=custom 时使用）
+  # 注意：客户端请求时 model 参数只支持 "smart" 这一个值
+  #   - model: "smart" → 启用智能场景路由（使用此映射）
+  #   - model: 空或不传 → 使用默认策略
   model_mapping:
     simple: qwen3.5-flash      # 简单问候
     coding: qwen3-coder-plus   # 代码任务

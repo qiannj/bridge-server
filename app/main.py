@@ -3,6 +3,11 @@
 
 from fastapi import FastAPI, Request, Depends, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse, JSONResponse
+import asyncio
+import json
+import time
+import httpx
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -18,11 +23,11 @@ from app.auth import verify_token, get_current_user
 from app.router import route_model, call_llm
 from services.usage import record_usage, get_tracker
 
-# 🔒 安全：日志级别（从环境变量读取，默认 WARNING）
-log_level = os.getenv("LOG_LEVEL", "WARNING").upper()
+# 🔒 安全：日志级别（从环境变量读取，默认 INFO）
+log_level = os.getenv("LOG_LEVEL", "INFO").upper()
 
 logging.basicConfig(
-    level=getattr(logging, log_level, logging.WARNING),
+    level=getattr(logging, log_level, logging.INFO),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
@@ -54,6 +59,24 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc"
 )
+
+# 🔒 安全：全局异常处理器 - 返回详细错误信息（仅 DEBUG 模式）
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """全局 HTTP 异常处理器"""
+    logger.warning(f"HTTP 错误 | {exc.status_code} | {exc.detail}")
+    
+    # 返回详细错误信息（包括 status code）
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": {
+                "message": exc.detail,
+                "status_code": exc.status_code,
+                "type": "http_error"
+            }
+        }
+    )
 
 # 🔒 安全：CORS 配置（默认禁止所有）
 server_config = config.get("server", {})
@@ -175,9 +198,9 @@ async def chat_completions(
             )
 
         # 🔒 安全：验证消息内容
-        MAX_MESSAGE_LENGTH = 10000
+        MAX_MESSAGE_LENGTH = 100000  # v2.1.1: 增加长度限制以支持长推理
         for i, msg in enumerate(messages):
-            content = msg.get("content", "")
+            content = msg.get("content") or ""  # 处理 None 的情况
             if len(content) > MAX_MESSAGE_LENGTH:
                 raise HTTPException(
                     status_code=400,
@@ -190,15 +213,31 @@ async def chat_completions(
 
         if not text:
             raise HTTPException(status_code=400, detail="消息内容为空")
-
+        
+        # 🚀 v2.1.1: 支持任意 model 参数，都使用智能路由
+        requested_model = req_dict.get("model", None)
+        
+        # 检查是否启用 stream 模式
+        stream = req_dict.get("stream", False)
+        
         # 路由到合适的模型
-        logger.info(f"收到请求 | user={current_user.get('username', 'unknown')} | text={text[:50]}...")
+        if requested_model == "smart":
+            logger.info(f"收到请求 | user={current_user.get('username', 'unknown')} | text={text[:50]}... | 模式=智能路由")
+        else:
+            logger.info(f"收到请求 | user={current_user.get('username', 'unknown')} | text={text[:50]}... | 模式=默认")
 
-        selected_model, task_type, reason = route_model(text, config)
+        selected_model, task_type, reason = route_model(text, config, requested_model)
 
         logger.info(
             f"路由决策 | 任务类型={task_type} | 模型={selected_model} | 原因={reason}"
         )
+
+        # 🚀 v2.1.1: 处理 stream 模式
+        if stream:
+            return await chat_completions_stream(
+                selected_model, messages, config,
+                current_user, task_type, reason
+            )
 
         # 调用模型
         response = await call_llm(selected_model, req_dict["messages"], config)
@@ -247,6 +286,11 @@ async def completions(
 
 # ============ 管理接口 ============
 
+
+@app.get("/v1/models")
+async def list_models_v1():
+    """OpenAI 兼容的模型列表接口"""
+    return await list_models()
 
 @app.get("/api/models")
 async def list_models():
@@ -319,3 +363,123 @@ if __name__ == "__main__":
     port = server_config.get("port", 8080)
 
     uvicorn.run(app, host=host, port=port, workers=1)
+
+
+# ============ Stream 模式支持 (v2.1.1) ============
+
+async def chat_completions_stream(
+    model: str,
+    messages: list,
+    config: dict,
+    current_user: dict,
+    task_type: str,
+    reason: str
+):
+    """
+    🚀 v2.1.1: Stream 模式，支持心跳防止超时
+    
+    使用 SSE (Server-Sent Events) 保持连接活跃，
+    定期发送注释行 : 来防止代理/负载均衡超时
+    """
+    
+    async def generate():
+        """SSE 流生成器，包含心跳机制"""
+        
+        # 获取 provider 配置
+        if "/" in model:
+            provider, model_name = model.split("/", 1)
+        else:
+            provider = None
+            model_name = model
+        
+        providers = config.get("providers", [])
+        provider_config = None
+        
+        if isinstance(providers, list):
+            for p in providers:
+                p_name = p.get("name", "")
+                if provider and p_name == provider:
+                    provider_config = p
+                    break
+                elif not provider:
+                    models = p.get("models", [])
+                    if isinstance(models, list):
+                        for m in models:
+                            m_id = m.get("id", "") if isinstance(m, dict) else str(m)
+                            if m_id == model_name:
+                                provider_config = p
+                                provider = p_name
+                                break
+                    if provider_config:
+                        break
+        elif isinstance(providers, dict):
+            provider_config = providers.get(provider, {})
+        
+        if not provider_config:
+            yield 'data: {"error":"Provider not found"}\n\n'
+            return
+        
+        api_key = provider_config.get("api_key", "")
+        if "api_key_env" in provider_config:
+            env_var = provider_config["api_key_env"]
+            api_key = os.getenv(env_var, "")
+        
+        if not api_key:
+            yield 'data: {"error":"API key not found"}\n\n'
+            return
+        
+        base_url = provider_config.get("base_url", "")
+        
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        # 构建 payload，确保 stream=True
+        payload = {
+            "model": model_name,
+            "messages": messages,
+            "stream": True
+        }
+        
+        heartbeat_interval = 20  # 每 20 秒发送一次心跳
+        last_heartbeat = time.time()
+        
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=30.0)) as client:
+                async with client.stream(
+                    "POST",
+                    f"{base_url}/chat/completions",
+                    json=payload,
+                    headers=headers
+                ) as response:
+                    
+                    async for line in response.aiter_lines():
+                        if line.startswith("data: "):
+                            data = line[6:]  # Remove "data: " prefix
+                            
+                            # 定期发送心跳（SSE 注释行）
+                            current_time = time.time()
+                            if current_time - last_heartbeat > heartbeat_interval:
+                                yield ": heartbeat\n\n"  # SSE 注释，保持连接
+                                last_heartbeat = current_time
+                            
+                            if data.strip() == "[DONE]":
+                                yield "data: [DONE]\n\n"
+                                break
+                            
+                            yield f"data: {data}\n\n"
+                            
+        except Exception as e:
+            logger.error(f"Stream 错误: {e}")
+            yield f'data: {{"error":"{str(e)}"}}\n\n'
+    
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"  # 禁用 Nginx 缓冲
+        }
+    )

@@ -33,13 +33,36 @@ TASK_KEYWORDS = {
 }
 
 
-def detect_task_type(message: str) -> str:
+def detect_task_type(message) -> str:
     """
     根据消息内容识别任务类型
+    
+    支持多种输入格式：
+    - 字符串：直接使用
+    - 列表：提取最后一条消息的 content
+    - 字典：直接提取 content 字段
+    - 其他类型：返回 "general"
     """
     if not message:
         return "general"
-
+    
+    # 如果是字典，直接提取 content
+    if isinstance(message, dict):
+        message = message.get("content", "")
+    
+    # 如果是列表，提取最后一条消息的 content
+    if isinstance(message, list):
+        if len(message) > 0 and isinstance(message[-1], dict):
+            message = message[-1].get("content", "")
+        elif len(message) > 0 and isinstance(message[-1], str):
+            message = message[-1]
+        else:
+            return "general"
+    
+    # 确保是字符串
+    if not isinstance(message, str):
+        return "general"
+    
     clean_message = re.sub(r"[^\w\s\u4e00-\u9fff]", "", message.lower())
     priority_order = ["complex", "coding", "writing", "analysis", "creative", "simple"]
 
@@ -51,38 +74,51 @@ def detect_task_type(message: str) -> str:
     return "general"
 
 
-def route_model(message: str, config: dict) -> Tuple[str, str, str]:
+def route_model(message: str, config: dict, requested_model: str = None) -> Tuple[str, str, str]:
     """
     根据任务类型路由到合适的模型
     
     v1.6.0 升级：支持 JS 沙箱自定义路由
+    v2.1.0 升级：支持智能路由模式（接受任意 model 参数，都使用智能路由）
+    v2.1.1 升级：支持 stream 模式 + 心跳防止超时
     
     Args:
         message: 用户消息
         config: 配置字典
+        requested_model: 客户端请求的模型 ID（可选）
+            - 任意值：都使用智能路由，但记录原始请求的模型
+            - None：使用默认路由策略
     
     Returns:
         (selected_model, task_type, reason)
     """
-    # 检查是否启用了自定义路由
+    # 🚀 v2.1.1: 无论传什么 model，都使用智能路由
+    if requested_model:
+        logger.info(f"收到请求 model={requested_model}，使用智能路由")
+    else:
+        logger.info(f"未指定 model，使用智能路由")
+    
+    # 2. 检查是否启用了自定义路由
     routing_config = config.get("routing", {})
     
-    # 1. 优先使用 JS 沙箱自定义路由
+    # 3. 优先使用 JS 沙箱自定义路由
     if routing_config.get("custom_routing_enabled", False):
         custom_route = execute_js_route(message, routing_config)
         if custom_route:
             logger.info(f"使用自定义路由 | model={custom_route['model']} | reason={custom_route['reason']}")
             return custom_route['model'], "custom", custom_route['reason']
     
-    # 2. 使用默认路由策略
+    # 4. 使用默认路由策略
     task_type = detect_task_type(message)
     strategy = routing_config.get("strategy", "balanced")
     model_mapping = routing_config.get("model_mapping", {})
     
-    if strategy == "custom" and model_mapping:
+    # 优先使用配置中的 model_mapping
+    if model_mapping:
         model_id = model_mapping.get(task_type, model_mapping.get("general", "qwen3.5-plus"))
-        reason = f"自定义路由：{task_type}"
+        reason = f"智能路由：{task_type}"
     else:
+        # 没有配置 model_mapping 时，使用默认策略映射
         default_mapping = get_default_mapping(strategy)
         model_id = default_mapping.get(task_type, "qwen3.5-plus")
         reason = f"策略：{strategy}, 任务类型：{task_type}"

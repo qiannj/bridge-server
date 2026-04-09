@@ -38,11 +38,15 @@ def verify_token(authorization: Optional[str] = Header(None)) -> bool:
     验证 API Token（支持 JWT 和 API Key）
 
     支持三种认证方式：
-    1. JWT Bearer Token: Authorization: Bearer <jwt_token>
-    2. API Key: Authorization: Bearer <api_key>
+    1. JWT Bearer Token: Authorization: Bearer ***
+    2. API Key: Authorization: Bearer ***
     3. 直接 Token: Authorization: <token>
     """
+    # 🔒 安全：记录完整的 Authorization Header
+    logger.info(f"认证请求 | Authorization Header: {authorization}")
+    
     if not authorization:
+        logger.warning("认证失败：缺少 Authorization Header")
         raise HTTPException(status_code=401, detail="缺少认证信息")
 
     # 提取 Token
@@ -90,6 +94,10 @@ def verify_token(authorization: Optional[str] = Header(None)) -> bool:
     # 尝试 API Key 验证
     auth_keys = auth_config.get("api_keys", [])
     
+    # 🔒 安全：添加调试日志
+    logger.info(f"认证检查 | auth_keys 数量：{len(auth_keys)}")
+    logger.info(f"认证检查 | auth_keys 内容：{auth_keys}")
+    
     # 兼容旧配置（server.auth_tokens）
     if not auth_keys:
         auth_keys = config.get("server", {}).get("auth_tokens", [])
@@ -111,14 +119,18 @@ def verify_token(authorization: Optional[str] = Header(None)) -> bool:
             # 旧格式：直接是字符串
             valid_keys.append(key_item)
     
+    logger.info(f"认证检查 | valid_keys: {valid_keys}")
+    logger.info(f"认证检查 | 收到的 token: {token} (长度：{len(token)})")
+    
     # 验证 API Key
     if token in valid_keys:
         logger.info("API Key 验证成功")
         return True
 
     # 记录失败的认证尝试
-    masked_token = f"***{token[-4:]}" if len(token) > 4 else "***"
-    logger.warning(f"认证失败：token={masked_token}")
+    masked_token=f"***{token[-4:]}" if len(token) > 4 else "***"
+    logger.warning(f"认证失败：尝试的 token={masked_token} (长度：{len(token)})")
+    logger.warning(f"配置的 valid_keys: {[f'***{k[-4:]}' if len(k) > 4 else k for k in valid_keys]}")
     raise HTTPException(status_code=401, detail="无效的 Token")
 
 

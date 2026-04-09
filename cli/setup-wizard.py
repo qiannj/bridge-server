@@ -486,13 +486,35 @@ class SetupWizard:
                 f.write(f"{k}={v}\n")
     
     def _configure_scenarios(self):
-        """配置场景化模型"""
+        """配置场景化模型 - 优化：从已配置模型中选择"""
         print(f"\n{Colors.BOLD}🎯 步骤 2/4: 配置场景化模型{Colors.ENDC}")
         print(f"{'-'*60}\n")
         
         use_scenarios = input("是否配置场景化模型？[y/N]: ").strip().lower()
         if use_scenarios != 'y':
             print(f"\n{Colors.YELLOW}⚠️  已跳过{Colors.ENDC}")
+            return
+        
+        # 收集所有已配置的模型 ID
+        available_models = []
+        for provider in self.config['providers']:
+            provider_name = provider.get('name', 'unknown')
+            models = provider.get('models', [])
+            if isinstance(models, list):
+                for model in models:
+                    model_id = model.get('id', '') if isinstance(model, dict) else str(model)
+                    full_id = f"{provider_name}/{model_id}"
+                    available_models.append(full_id)
+            elif isinstance(models, dict):
+                for model_id in models.keys():
+                    full_id = f"{provider_name}/{model_id}"
+                    available_models.append(full_id)
+        
+        # 添加智能路由选项
+        available_models.insert(0, "smart")
+        
+        if not available_models:
+            print(f"{Colors.RED}❌ 没有可用的模型，请先配置 Provider{Colors.ENDC}")
             return
         
         scenarios = {
@@ -506,11 +528,14 @@ class SetupWizard:
         
         for key, scenario in scenarios.items():
             print(f"\n{scenario['name']} ({scenario['desc']}):")
-            model = input(f"  指定模型 (回车=默认): ").strip()
-            if model:
-                self.config['scenarios'][key] = {'enabled': True, 'model': model}
+            print(f"  可用模型：smart (智能路由), {', '.join(available_models[1:][:5])}...")
+            model = input(f"  选择模型 (输入 smart 或模型 ID，回车=smart): ").strip()
+            if not model:
+                model = 'smart'
+            self.config['scenarios'][key] = {'enabled': True, 'model': model}
         
         print(f"\n{Colors.GREEN}✅ 场景化模型配置完成{Colors.ENDC}")
+        print(f"   提示：设置为 'smart' 时，系统会根据任务类型自动选择最优模型")
     
     def _select_routing(self):
         """选择路由策略"""
