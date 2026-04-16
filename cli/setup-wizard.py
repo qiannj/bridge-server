@@ -21,10 +21,11 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
-# 添加父目录到路径
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# 添加 src 到路径
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from providers.loader import ProviderLoader, Provider, Model
+from bridge_server.provider_catalog import ProviderLoader, Provider, Model
 
 logging.basicConfig(
     level=logging.INFO,
@@ -221,7 +222,7 @@ class SetupWizard:
         
         # 配置 API Key
         print(f"\n配置 {provider.name}:")
-        print(f"  Base URL: {provider.api_base}")
+        print(f"  Base URL: {provider.base_url}")
         print(f"  环境变量：{provider.api_key_env}")
         print(f"  获取地址：{provider.api_key_url}\n")
         
@@ -237,14 +238,14 @@ class SetupWizard:
         
         # 测试连接
         print(f"\n{Colors.CYAN}测试连接...{Colors.ENDC}")
-        success = self._test_provider_connection(provider.api_base, api_key, models[0]['id'])
+        success = self._test_provider_connection(provider.base_url, api_key, models[0]['id'])
         
         if success:
             # 保存配置
             provider_config = {
                 'name': provider.name,
                 'api_key_env': provider.api_key_env,
-                'base_url': provider.api_base,
+                'base_url': provider.base_url,
                 'models': models
             }
             self.config['providers'].append(provider_config)
@@ -611,7 +612,7 @@ class SetupWizard:
                 [python_exe, '-m', 'uvicorn', 'app.main:app', '--host', '0.0.0.0', '--port', '8080'],
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
-                cwd=Path(__file__).parent.parent
+                cwd=REPO_ROOT
             )
             log_file.close()
             

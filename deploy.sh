@@ -144,7 +144,7 @@ cmd_scale() {
     
     print_header "扩缩容到 $1 个实例"
     
-    "$SCRIPT_DIR/scripts/scale.sh" "$1"
+    "$SCRIPT_DIR/scripts/ops/scale.sh" "$1"
 }
 
 # 启用 SSL

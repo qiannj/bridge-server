@@ -4,6 +4,25 @@
 
 ---
 
+## [v2.2.0] - 2026-04-16
+
+### 🧹 仓库收敛与文档整合
+
+- ✅ 将 `src/bridge_server/runtime.py` 固化为唯一运行时实现
+- ✅ 将 `app.main:app` 与 `main_v2.py` 收敛为兼容包装层
+- ✅ 在主运行时补齐 `/ready`、`/api/models`、`/api/routing`、`/api/usage`、`/api/budget`
+- ✅ 删除阶段性脚本、历史总结文档、过期 quickstart 与旧版测试
+- ✅ 将仓库文档收敛为 `README / INSTALL / USAGE / CHANGELOG / TODO`
+- ✅ 将 bench / verify / security / ops 脚本拆分到 `scripts/` 子目录
+
+### 🏗️ 架构影响
+
+- 活跃代码路径集中到 `src/bridge_server/` 与 `scripts/{ops,bench,verify,security}/`
+- 旧版 `app.auth`、`app.router`、`services/*` 和 `app/api/v1` 不再保留
+- 外部启动方式仍可继续使用 `app.main:app`
+
+---
+
 ## [v2.1.0] - 2026-04-07
 
 ### 🎯 版本概述
