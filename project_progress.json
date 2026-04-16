@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-04-16 00:14:39",
+  "progress": {
+    "stage1": {
+      "completion": 0.8461538461538461,
+      "files": "11/13",
+      "size": 100344
+    },
+    "stage2": {
+      "completion": 0.9,
+      "files": "9/10",
+      "size": 125208
+    },
+    "total": {
+      "completion": 0.8695652173913043,
+      "files": "20/23",
+      "size": 225552,
+      "core_completion": 1.0
+    }
+  },
+  "version": "v2.0",
+  "stage": "阶段2实施完成"
+}

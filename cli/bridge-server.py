@@ -14,29 +14,37 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional
 
+# 导入共享配置模块
+from config import (
+    CONFIG_DIR,
+    CONFIG_FILE,
+    LOG_DIR,
+    LOG_FILE,
+    USAGE_FILE,
+    get_server_url,
+    get_default_port,
+    get_api_key_from_env,
+    is_service_running,
+)
+
+# 安装目录
+INSTALL_DIR = Path(os.getenv("INSTALL_DIR", Path.home() / ".local" / "opt" / "bridge-server"))
+
 # 颜色定义
 class Colors:
-    HEADER = '\033[95m'
-    BLUE = '\033[94m'
-    CYAN = '\033[96m'
-    GREEN = '\033[92m'
-    YELLOW = '\033[93m'
-    RED = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
+    HEADER = '\\033[95m'
+    BLUE = '\\033[94m'
+    CYAN = '\\033[96m'
+    GREEN = '\\033[92m'
+    YELLOW = '\\033[93m'
+    RED = '\\033[91m'
+    ENDC = '\\033[0m'
+    BOLD = '\\033[1m'
 
 def print_success(text): print(f"{Colors.GREEN}✓{Colors.ENDC} {text}")
 def print_error(text): print(f"{Colors.RED}✗{Colors.ENDC} {text}")
 def print_warning(text): print(f"{Colors.YELLOW}⚠{Colors.ENDC} {text}")
 def print_info(text): print(f"{Colors.BLUE}ℹ{Colors.ENDC} {text}")
-
-# 配置路径（支持环境变量覆盖，默认使用用户目录）
-CONFIG_DIR = Path(os.getenv("CONFIG_DIR", Path.home() / ".bridge-server"))
-CONFIG_FILE = CONFIG_DIR / "config.yaml"
-USAGE_FILE = CONFIG_DIR / "usage.json"
-LOG_DIR = Path(os.getenv("LOG_DIR", Path.home() / ".local" / "var" / "log" / "bridge-server"))
-LOG_FILE = LOG_DIR / "bridge-server.log"
-INSTALL_DIR = Path(os.getenv("INSTALL_DIR", Path.home() / ".local" / "opt" / "bridge-server"))
 
 def load_config() -> dict:
     """加载配置文件"""
@@ -93,7 +101,8 @@ def cmd_status():
     
     # 检查服务状态
     try:
-        response = httpx.get("http://localhost:8080/health", timeout=2)
+        server_url = get_server_url()
+        response = httpx.get(f"{server_url}/health", timeout=2)
         if response.status_code == 200:
             print_success("服务状态：运行中")
             data = response.json()
@@ -106,11 +115,12 @@ def cmd_status():
     # 检查端口
     import subprocess
     try:
-        result = subprocess.run(["lsof", "-i", ":8080"], capture_output=True, text=True)
+        port = get_default_port()
+        result = subprocess.run(["lsof", "-i", f":{port}"], capture_output=True, text=True)
         if result.returncode == 0:
-            print_success("端口 8080：已监听")
+            print_success(f"端口 {port}：已监听")
         else:
-            print_warning("端口 8080：未监听")
+            print_warning(f"端口 {port}：未监听")
     except Exception:
         pass
     
@@ -278,10 +288,12 @@ def cmd_test():
     """测试连接"""
     print(f"\n{Colors.BOLD}测试 Bridge Server 连接{Colors.ENDC}\n")
     
+    server_url = get_server_url()
+    
     # 测试健康检查
     print("1. 健康检查...", end=" ")
     try:
-        response = httpx.get("http://localhost:8080/health", timeout=5)
+        response = httpx.get(f"{server_url}/health", timeout=5)
         if response.status_code == 200:
             print_success("OK")
         else:
@@ -293,7 +305,7 @@ def cmd_test():
     print("2. API 测试...", end=" ")
     try:
         response = httpx.post(
-            "http://localhost:8080/v1/chat/completions",
+            f"{server_url}/v1/chat/completions",
             json={"messages": [{"role": "user", "content": "hi"}]},
             headers={"Authorization": "Bearer test", "Content-Type": "application/json"},
             timeout=10
@@ -308,7 +320,7 @@ def cmd_test():
     # 测试路由
     print("3. 路由配置...", end=" ")
     try:
-        response = httpx.get("http://localhost:8080/api/routing", timeout=5)
+        response = httpx.get(f"{server_url}/api/routing", timeout=5)
         if response.status_code == 200:
             print_success("OK")
             data = response.json()
@@ -381,8 +393,9 @@ def cmd_usage_records(period: str = "today"):
     
     try:
         import httpx
+        server_url = get_server_url()
         response = httpx.get(
-            f"http://localhost:8080/api/v1/usage/records?period={period}",
+            f"{server_url}/api/v1/usage/records?period={period}",
             timeout=5
         )
         
@@ -461,8 +474,9 @@ def cmd_route_test(text: str):
     print(f"输入：{text[:50]}...")
     
     try:
+        server_url = get_server_url()
         response = httpx.post(
-            "http://localhost:8080/v1/chat/completions",
+            f"{server_url}/v1/chat/completions",
             json={"messages": [{"role": "user", "content": text}]},
             headers={"Authorization": "Bearer test", "Content-Type": "application/json"},
             timeout=10
@@ -489,7 +503,8 @@ def cmd_routing_strategy():
     
     try:
         import httpx
-        response = httpx.get("http://localhost:8080/api/v1/routing/strategy", timeout=5)
+        server_url = get_server_url()
+        response = httpx.get(f"{server_url}/api/v1/routing/strategy", timeout=5)
         
         if response.status_code == 200:
             data = response.json()
@@ -510,8 +525,9 @@ def cmd_routing_test(message: str):
     
     try:
         import httpx
+        server_url = get_server_url()
         response = httpx.post(
-            "http://localhost:8080/api/v1/routing/test",
+            f"{server_url}/api/v1/routing/test",
             json={"message": message},
             timeout=5
         )
@@ -536,7 +552,8 @@ def cmd_providers_list():
     
     try:
         import httpx
-        response = httpx.get("http://localhost:8080/api/v1/providers/list", timeout=5)
+        server_url = get_server_url()
+        response = httpx.get(f"{server_url}/api/v1/providers/list", timeout=5)
         
         if response.status_code == 200:
             data = response.json()
@@ -566,6 +583,7 @@ def cmd_health():
     """健康检查（v1.6.0 新增）"""
     print(f"\n{Colors.BOLD}健康检查{Colors.ENDC}\n")
     
+    server_url = get_server_url()
     checks = [
         ("/health", "健康检查"),
         ("/ready", "就绪检查"),
@@ -575,7 +593,7 @@ def cmd_health():
     for endpoint, name in checks:
         try:
             import httpx
-            response = httpx.get(f"http://localhost:8080{endpoint}", timeout=5)
+            response = httpx.get(f"{server_url}{endpoint}", timeout=5)
             
             if response.status_code == 200:
                 print_success(f"{name}: OK")
@@ -593,8 +611,9 @@ def cmd_auth_login(username: str, password: str):
     
     try:
         import httpx
+        server_url = get_server_url()
         response = httpx.post(
-            "http://localhost:8080/api/v1/auth/token",
+            f"{server_url}/api/v1/auth/token",
             json={"username": username, "password": password},
             timeout=5
         )
