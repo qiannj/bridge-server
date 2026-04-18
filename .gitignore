@@ -41,6 +41,7 @@ logs/
 .coverage
 htmlcov/
 .tox/
+tests/
 
 # 构建
 dist/

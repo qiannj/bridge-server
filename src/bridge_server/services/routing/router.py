@@ -334,9 +334,9 @@ class SmartRouter:
     
     def _generate_cache_key(self, message: str, context: Dict = None) -> str:
         """生成缓存键"""
-        # 对消息内容进行哈希，避免缓存键过长
-        message_hash = hashlib.md5(message.encode()).hexdigest()[:16]
-        
+        # 对消息内容进行哈希，避免缓存键过长（SHA-256，仅用于缓存键，非安全用途）
+        message_hash = hashlib.sha256(message.encode(), usedforsecurity=False).hexdigest()[:16]
+
         # 添加上下文信息
         context_str = ""
         if context:
@@ -345,10 +345,10 @@ class SmartRouter:
                 if key in ["user_domain", "last_task_type"]:  # 只包含影响路由的字段
                     context_items.append(f"{key}:{context[key]}")
             context_str = "_".join(context_items)
-        
+
         cache_key = f"route:{message_hash}"
         if context_str:
-            cache_key += f":{hashlib.md5(context_str.encode()).hexdigest()[:8]}"
+            cache_key += f":{hashlib.sha256(context_str.encode(), usedforsecurity=False).hexdigest()[:8]}"
         
         return cache_key
     

@@ -201,13 +201,13 @@ class BridgeServerMetrics:
             self.token_usage_total.labels(
                 provider=provider,
                 model=model,
-                token_type="prompt",
+                token_type="prompt",  # nosec B106 — Prometheus label value, not a password
             ).inc(prompt_tokens)
         if completion_tokens:
             self.token_usage_total.labels(
                 provider=provider,
                 model=model,
-                token_type="completion",
+                token_type="completion",  # nosec B106 — Prometheus label value, not a password
             ).inc(completion_tokens)
 
     def record_route_decision(
