@@ -75,12 +75,17 @@ def test_compatibility_admin_endpoints(monkeypatch):
         }
     }
 
+    # Bypass require_auth — these tests focus on business logic, not auth.
+    runtime.app.dependency_overrides[runtime.require_auth] = lambda: {"user_id": "test", "active": True}
+
     with TestClient(runtime.app) as client:
         ready = client.get("/ready")
         models = client.get("/api/models")
         routing = client.get("/api/routing")
         usage = client.get("/api/usage?period=month")
         budget = client.get("/api/budget")
+
+    runtime.app.dependency_overrides.clear()
 
     assert ready.status_code == 200
     assert ready.json()["status"] == "degraded"

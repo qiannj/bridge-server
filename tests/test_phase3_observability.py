@@ -98,8 +98,13 @@ def observability_client(monkeypatch):
     runtime.usage_tracker = None
     runtime.connection_pool_manager = None
 
+    # Bypass require_auth for observability tests.
+    runtime.app.dependency_overrides[runtime.require_auth] = lambda: {"user_id": "test", "active": True}
+
     with TestClient(runtime.app) as client:
         yield client
+
+    runtime.app.dependency_overrides.clear()
 
 
 def test_main_v2_async_exposes_prometheus_metrics(observability_client):
