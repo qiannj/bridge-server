@@ -535,8 +535,11 @@ async def chat_completions(
     
     try:
         # 1. 异步解析请求体
-        req_dict = await request.json()
-        
+        try:
+            req_dict = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="无效的 JSON 请求体")
+
         if "messages" not in req_dict or not req_dict["messages"]:
             raise HTTPException(status_code=400, detail="缺少messages字段")
         
