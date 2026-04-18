@@ -14,8 +14,10 @@ class DashScopeProvider(BaseProvider):
     """阿里云 DashScope Provider"""
     
     def __init__(self, config: Dict[str, Any]):
-        # 验证API密钥
+        # Validate API key and immediately remove it from the config dict so it
+        # is never accidentally serialised or exposed via self.config.
         self.api_key = config.get("api_key") or os.getenv("DASHSCOPE_API_KEY")
+        config.pop("api_key", None)
         if not self.api_key:
             raise ValueError("DashScope API密钥未配置，请设置 DASHSCOPE_API_KEY 环境变量")
         

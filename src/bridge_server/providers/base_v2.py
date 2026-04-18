@@ -67,12 +67,15 @@ class BaseProvider(ABC):
     
     def __init__(self, provider_id: str, config: Dict[str, Any]):
         self.provider_id = provider_id
+        # Extract the API key and remove it from the config dict immediately so it
+        # cannot be inadvertently serialised or exposed through self.config.
+        self._api_key = config.pop("api_key", "")
         self.config = config
         self.metrics = ProviderMetrics()
         self.status = ProviderStatus.UNKNOWN
         self._last_health_check = 0.0
         self._health_check_interval = 30.0  # 30秒
-        
+
         # 连接池优化：不再创建独立的HTTP会话
         # 使用全局连接池管理器
         logger.info(f"Provider {provider_id} 初始化，使用共享连接池")
@@ -100,7 +103,7 @@ class BaseProvider(ABC):
             # 简单的健康检查请求
             async with session.get(
                 f"{self.config['base_url']}/models",
-                headers={"Authorization": f"Bearer {self.config['api_key']}"},
+                headers={"Authorization": f"Bearer {self._api_key}"},
                 timeout=aiohttp.ClientTimeout(total=5)
             ) as response:
                 if response.status == 200:
@@ -150,7 +153,7 @@ class BaseProvider(ABC):
                 f"{self.config['base_url']}/chat/completions",
                 json=request_data,
                 headers={
-                    "Authorization": f"Bearer {self.config['api_key']}",
+                    "Authorization": f"Bearer {self._api_key}",
                     "Content-Type": "application/json"
                 }
             ) as response:
@@ -215,7 +218,7 @@ class BaseProvider(ABC):
                 f"{self.config['base_url']}/chat/completions",
                 json=request_data,
                 headers={
-                    "Authorization": f"Bearer {self.config['api_key']}",
+                    "Authorization": f"Bearer {self._api_key}",
                     "Content-Type": "application/json"
                 }
             ) as response:

@@ -1,5 +1,15 @@
 # Bridge Server 使用指南
 
+## 获取 Token
+
+首次启动时服务会自动生成 Admin Token 并打印到控制台（仅一次），形如：
+
+```
+Admin token : 71a63d726fbcfa80c98befaffa432ce1ce4b06e920be755aecef10d3c05bff50
+```
+
+保存后即可用于所有需要认证的请求。
+
 ## 认证
 
 所有受保护接口使用：
@@ -7,6 +17,10 @@
 ```http
 Authorization: Bearer <your-token>
 ```
+
+**无需认证**：`/health`、`/ready`、`/v1/models`
+
+**需要认证**：`/v1/chat/completions`、`/metrics`、`/stats`、`/metrics/prometheus`、`/api/usage`、`/api/budget`
 
 ## Chat Completions
 
@@ -54,6 +68,7 @@ curl -N -X POST http://127.0.0.1:19377/v1/chat/completions \
 ## 模型与路由
 
 ```bash
+# 无需认证
 curl http://127.0.0.1:19377/v1/models
 curl http://127.0.0.1:19377/api/models
 curl http://127.0.0.1:19377/api/routing
@@ -64,25 +79,32 @@ curl http://127.0.0.1:19377/api/routing
 ## 用量与预算
 
 ```bash
-curl http://127.0.0.1:19377/api/usage?period=today
-curl http://127.0.0.1:19377/api/usage?period=month
-curl http://127.0.0.1:19377/api/budget
+TOKEN=your-token
+
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:19377/api/usage?period=today
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:19377/api/usage?period=month
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:19377/api/budget
 ```
 
 ## 健康检查与观测
 
 ```bash
+TOKEN=your-token
+
+# 无需认证
 curl http://127.0.0.1:19377/health
 curl http://127.0.0.1:19377/ready
-curl http://127.0.0.1:19377/metrics
-curl http://127.0.0.1:19377/metrics/prometheus
-curl http://127.0.0.1:19377/stats
+
+# 需要认证
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:19377/metrics
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:19377/metrics/prometheus
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:19377/stats
 ```
 
 说明：
 
 - `/health`：总体健康状态
-- `/ready`：依赖就绪状态
+- `/ready`：依赖就绪状态（适合 k8s readiness probe）
 - `/metrics`：JSON 指标快照
 - `/metrics/prometheus`：Prometheus 文本格式
 - `/stats`：运行时汇总视图

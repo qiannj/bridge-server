@@ -48,7 +48,7 @@ from .utils.cache import HybridCache
 from .utils.connection_pools import close_connection_pool_manager, get_connection_pool_manager
 
 # 异步模块
-from .auth import get_current_user_async, AsyncAuthManager
+from .auth import get_auth_manager, get_current_user_async, AsyncAuthManager
 from .usage import UsageTrackerAsync, record_usage_async
 
 # 配置日志
@@ -190,19 +190,31 @@ async def initialize_system():
 
 
 # FastAPI应用
+# Disable interactive API docs in production (set ENABLE_DOCS=true only for dev).
+_enable_docs = os.getenv("ENABLE_DOCS", "false").lower() == "true"
 app = FastAPI(
     title="Bridge Server v2.0",
     description="高性能AI Gateway - 异步优化版",
     version="2.0.0-async",
-    docs_url="/docs",
-    redoc_url="/redoc"
+    docs_url="/docs" if _enable_docs else None,
+    redoc_url="/redoc" if _enable_docs else None,
+    openapi_url="/openapi.json" if _enable_docs else None,
 )
 
-# CORS中间件
+# CORS middleware: credentials can only be used with explicit origin allowlist.
+# Set CORS_ORIGINS env var to a comma-separated list of allowed origins to enable.
+_cors_origins_raw = os.getenv("CORS_ORIGINS", "").strip()
+_cors_origins: list = (
+    [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
+    if _cors_origins_raw
+    else []
+)
+# Wildcard origins must not be paired with allow_credentials=True (browser spec).
+_allow_credentials = bool(_cors_origins) and "*" not in _cors_origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins or ["*"],
+    allow_credentials=_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -212,6 +224,17 @@ limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
+
+
+async def require_auth(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
+    """FastAPI dependency: reject requests without a valid auth token."""
+    if not authorization:
+        raise HTTPException(status_code=401, detail="认证必须：请提供 Authorization header")
+    auth_mgr = await get_auth_manager()
+    token_info = await auth_mgr.verify_token(authorization)
+    if not token_info:
+        raise HTTPException(status_code=401, detail="无效或已过期的认证令牌")
+    return token_info
 
 
 @app.middleware("http")
@@ -405,7 +428,7 @@ def _build_model_catalog() -> List[Dict[str, Any]]:
 
 @app.get("/metrics")
 @app.get("/stats")
-async def get_metrics(format: str = "json"):
+async def get_metrics(format: str = "json", _auth: Dict[str, Any] = Depends(require_auth)):
     """获取系统指标（JSON 或 Prometheus）。"""
     snapshot = await _collect_metrics_snapshot()
     metrics_collector.observe_runtime_snapshot(snapshot)
@@ -420,7 +443,7 @@ async def get_metrics(format: str = "json"):
 
 
 @app.get("/metrics/prometheus")
-async def get_prometheus_metrics():
+async def get_prometheus_metrics(_auth: Dict[str, Any] = Depends(require_auth)):
     """Prometheus 指标导出。"""
     snapshot = await _collect_metrics_snapshot()
     metrics_collector.observe_runtime_snapshot(snapshot)
@@ -468,7 +491,11 @@ async def get_routing_config():
 
 
 @app.get("/api/usage")
-async def get_usage(period: str = "today", user_id: Optional[str] = None):
+async def get_usage(
+    period: str = "today",
+    user_id: Optional[str] = None,
+    _auth: Dict[str, Any] = Depends(require_auth),
+):
     """Legacy-compatible usage stats endpoint."""
     if not usage_tracker:
         raise HTTPException(status_code=503, detail="用量跟踪器未初始化")
@@ -476,7 +503,10 @@ async def get_usage(period: str = "today", user_id: Optional[str] = None):
 
 
 @app.get("/api/budget")
-async def get_budget(user_id: Optional[str] = None):
+async def get_budget(
+    user_id: Optional[str] = None,
+    _auth: Dict[str, Any] = Depends(require_auth),
+):
     """Legacy-compatible budget endpoint."""
     if not usage_tracker:
         raise HTTPException(status_code=503, detail="用量跟踪器未初始化")
@@ -484,10 +514,11 @@ async def get_budget(user_id: Optional[str] = None):
 
 
 @app.post("/v1/chat/completions")
-@limiter.limit("100/minute")  # 提高限流阈值
+@limiter.limit("100/minute")
 async def chat_completions(
     request: Request,
-    authorization: Optional[str] = Header(None)
+    authorization: Optional[str] = Header(None),
+    _auth: Dict[str, Any] = Depends(require_auth),
 ):
     """
     OpenAI兼容聊天完成API - v2.0异步优化版
@@ -512,7 +543,7 @@ async def chat_completions(
         messages = req_dict["messages"]
         stream = req_dict.get("stream", False)
         
-        # 2. 并发执行身份验证和路由决策（性能优化）
+        # 2. 并发执行用户信息查询和路由决策（性能优化）
         perf_parallel_start = time.perf_counter()
         
         auth_task = asyncio.create_task(get_current_user_async(authorization))
@@ -521,10 +552,16 @@ async def chat_completions(
         user_context_task = asyncio.create_task(_analyze_user_context(messages))
         
         # 等待并发任务完成
-        current_user, user_context = await asyncio.gather(
+        current_user_opt, user_context = await asyncio.gather(
             auth_task,
             user_context_task
         )
+        # _auth dependency already validated the token; use its user_id as fallback.
+        current_user: Dict[str, Any] = current_user_opt or {
+            "user_id": _auth.get("user_id", "unknown"),
+            "domain": "general",
+            "permissions": ["read"],
+        }
         bind_user_context(
             user_id=current_user.get("user_id"),
             user_domain=current_user.get("domain", "general"),

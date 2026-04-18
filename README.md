@@ -46,16 +46,26 @@
 
 ```bash
 pip install -r requirements.txt -r requirements-v2.txt
-python cli/setup-wizard.py
-python -m uvicorn app.main:app --host 127.0.0.1 --port 19377
-curl http://127.0.0.1:19377/health
+
+# 设置至少一个 Provider API Key
+export DASHSCOPE_API_KEY=sk-xxx
+
+# 启动（首次运行会打印 Admin Token，请保存）
+python -m uvicorn bridge_server.runtime:app --app-dir src --host 127.0.0.1 --port 19377
+```
+
+首次启动输出示例：
+
+```
+IMPORTANT: New admin token generated — save it now.
+  Admin token : 71a63d726fbcfa80...
 ```
 
 最小请求示例：
 
 ```bash
 curl -X POST http://127.0.0.1:19377/v1/chat/completions \
-  -H "Authorization: Bearer your-token" \
+  -H "Authorization: Bearer <your-token>" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "smart",
@@ -80,18 +90,19 @@ Client
 
 ## 主要接口
 
-| 接口 | 说明 |
-| --- | --- |
-| `POST /v1/chat/completions` | OpenAI 兼容聊天接口 |
-| `GET /v1/models` | OpenAI 风格模型列表 |
-| `GET /api/models` | 管理视角模型列表 |
-| `GET /api/routing` | 当前路由策略与映射 |
-| `GET /api/usage` | 用量统计 |
-| `GET /api/budget` | 预算状态 |
-| `GET /health` | 健康检查 |
-| `GET /ready` | 就绪检查 |
-| `GET /metrics` | JSON 指标 |
-| `GET /metrics/prometheus` | Prometheus 指标 |
+| 接口 | 说明 | 认证 |
+| --- | --- | --- |
+| `POST /v1/chat/completions` | OpenAI 兼容聊天接口 | ✅ 必须 |
+| `GET /v1/models` | OpenAI 风格模型列表 | 否 |
+| `GET /api/models` | 管理视角模型列表 | 否 |
+| `GET /api/routing` | 当前路由策略与映射 | 否 |
+| `GET /api/usage` | 用量统计 | ✅ 必须 |
+| `GET /api/budget` | 预算状态 | ✅ 必须 |
+| `GET /health` | 健康检查 | 否 |
+| `GET /ready` | 就绪检查 | 否 |
+| `GET /metrics` | JSON 指标 | ✅ 必须 |
+| `GET /metrics/prometheus` | Prometheus 指标 | ✅ 必须 |
+| `GET /stats` | 运行时汇总 | ✅ 必须 |
 
 ## 核心文档
 
