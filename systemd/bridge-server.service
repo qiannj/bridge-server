@@ -7,10 +7,11 @@ Wants=network-online.target
 Type=simple
 User=%I
 Group=%I
-WorkingDirectory=/opt/bridge-server/src
+WorkingDirectory=/opt/bridge-server
 Environment="PATH=/opt/bridge-server/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="BRIDGE_CONFIG_DIR=/opt/bridge-server/config"
 EnvironmentFile=-/opt/bridge-server/config/.env
-ExecStart=/opt/bridge-server/venv/bin/python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8080 --workers 1
+ExecStart=/opt/bridge-server/venv/bin/python3 -m uvicorn bridge_server.runtime:app --app-dir /opt/bridge-server/src --host 0.0.0.0 --port 8080 --workers 1
 Restart=always
 RestartSec=5
 StandardOutput=journal

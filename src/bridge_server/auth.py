@@ -9,6 +9,7 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import secrets
 import time
 from typing import Optional, Dict, Any
@@ -31,14 +32,20 @@ def _tokens_are_hashed(data: dict) -> bool:
     return data.get(_HASHED_FORMAT_MARKER) == _HASHED_FORMAT_VALUE
 
 
+def _default_config_dir() -> Path:
+    """Return config dir: BRIDGE_CONFIG_DIR env var, else ~/.bridge-server."""
+    env = os.getenv("BRIDGE_CONFIG_DIR")
+    return Path(env) if env else Path.home() / ".bridge-server"
+
+
 class AsyncAuthManager:
     """异步认证管理器"""
-    
+
     def __init__(self, config_dir: Optional[Path] = None):
-        self.config_dir = config_dir or Path.home() / ".bridge-server"
-        self.users_file = self.config_dir / "users.json" 
+        self.config_dir = config_dir or _default_config_dir()
+        self.users_file = self.config_dir / "users.json"
         self.tokens_file = self.config_dir / "tokens.json"
-        
+
         # 内存缓存（TTL: 5分钟）
         self._user_cache = {}
         self._token_cache = {}
