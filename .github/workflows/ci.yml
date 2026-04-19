@@ -1,0 +1,57 @@
+name: bridge-server-ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-and-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install bandit pip-audit
+
+      - name: Prepare reports directory
+        run: mkdir -p reports
+
+      - name: Compile Python sources
+        run: python -m py_compile cli/*.py src/bridge_server/**/*.py scripts/**/*.py
+
+      - name: Run unit tests
+        run: pytest -q
+
+      - name: Secret scan
+        run: bash scripts/security/secret-scan.sh
+
+      - name: Bandit high-severity gate
+        run: bandit -q -r src cli -lll
+
+      - name: Bandit JSON report
+        run: bandit -q -r src cli scripts -x scripts/security/security-fix.py -f json -o reports/bandit-report-current.json || true
+
+      - name: Dependency vulnerability audit
+        run: pip-audit -r requirements.txt --format json > reports/pip-audit-report.json
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-server-ci-reports
+          path: reports/

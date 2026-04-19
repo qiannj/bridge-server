@@ -4,17 +4,17 @@
 
 ## 高优先级
 
-1. **完善 CI**
-   - 增加针对 canonical runtime 的自动化测试与导入检查
-   - 覆盖健康检查、兼容接口、Prometheus 导出
-
-2. **补齐真实 Provider 集成验证**
+1. **补齐真实 Provider 集成验证**
    - 为有凭证的环境增加 smoke test
    - 覆盖流式输出、预算统计、路由退化
 
-3. **发布与部署规范化**
+2. **发布与部署规范化**
    - 统一 Docker 镜像产物
    - 梳理版本号与发布流程
+
+3. **增强 CI 深度**
+   - 在现有 GitHub Actions 基础上增加 runtime smoke test
+   - 逐步覆盖 `/health`、`/ready`、`/api/routing`、Prometheus 导出
 
 ## 中优先级
 
