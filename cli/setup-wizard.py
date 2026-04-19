@@ -97,7 +97,7 @@ class SetupWizard:
                 with open(config_path, 'r') as f:
                     existing = yaml.safe_load(f)
                     if existing:
-                        self.config.update(existing)
+                        self.config.update(self._normalize_existing_config(existing))
                         print(f"{Colors.GREEN}✓ 已加载现有配置{Colors.ENDC}")
             except Exception as e:
                 logger.warning(f"加载配置失败：{e}")
@@ -110,6 +110,60 @@ class SetupWizard:
                     if line and not line.startswith('#') and '=' in line:
                         k, v = line.split('=', 1)
                         os.environ[k.strip()] = v.strip()
+
+    def _normalize_existing_config(self, existing: Dict[str, Any]) -> Dict[str, Any]:
+        """兼容旧版配置结构，避免配置向导因历史格式崩溃。"""
+        normalized = dict(existing)
+        providers = normalized.get('providers', [])
+
+        if isinstance(providers, dict):
+            converted_providers = []
+            for provider_name, provider_data in providers.items():
+                if not isinstance(provider_data, dict):
+                    continue
+
+                models_data = provider_data.get('models', {})
+                converted_models = []
+
+                if isinstance(models_data, dict):
+                    for priority, (model_id, model_meta) in enumerate(models_data.items(), start=1):
+                        model_name = model_id
+                        if isinstance(model_meta, dict):
+                            model_name = model_meta.get('name') or model_meta.get('alias') or model_id
+                        converted_models.append({
+                            'id': model_id,
+                            'name': model_name,
+                            'priority': priority,
+                        })
+                elif isinstance(models_data, list):
+                    for priority, model in enumerate(models_data, start=1):
+                        if isinstance(model, dict):
+                            converted_models.append({
+                                'id': model.get('id', model.get('name', f'model-{priority}')),
+                                'name': model.get('name', model.get('id', f'model-{priority}')),
+                                'priority': model.get('priority', priority),
+                            })
+                        else:
+                            converted_models.append({
+                                'id': str(model),
+                                'name': str(model),
+                                'priority': priority,
+                            })
+
+                converted_provider = {
+                    'name': provider_data.get('name') or provider_name,
+                    'api_key_env': provider_data.get('api_key_env', f"{provider_name.upper().replace('-', '_')}_API_KEY"),
+                    'base_url': provider_data.get('base_url', ''),
+                    'models': converted_models,
+                }
+                converted_providers.append(converted_provider)
+
+            normalized['providers'] = converted_providers
+
+        elif not isinstance(providers, list):
+            normalized['providers'] = []
+
+        return normalized
     
     def run(self):
         """运行配置向导"""
