@@ -44,20 +44,22 @@ def get_default_port() -> int:
     获取服务默认端口
     
     优先级：
-    1. BRIDGE_SERVER_PORT 环境变量
-    2. config.yaml 中的 server.port
-    3. 默认值 19377
+    1. PORT 环境变量
+    2. BRIDGE_SERVER_PORT 环境变量（兼容旧配置）
+    3. config.yaml 中的 server.port
+    4. 默认值 19377
     
     Returns:
         int: 服务端口号
     """
     # 环境变量优先级最高
-    env_port = os.getenv("BRIDGE_SERVER_PORT")
-    if env_port:
-        try:
-            return int(env_port)
-        except ValueError:
-            pass
+    for env_name in ("PORT", "BRIDGE_SERVER_PORT"):
+        env_port = os.getenv(env_name)
+        if env_port:
+            try:
+                return int(env_port)
+            except ValueError:
+                pass
     
     # 从配置文件读取
     if CONFIG_FILE.exists():

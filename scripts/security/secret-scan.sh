@@ -59,7 +59,7 @@ log_info "扫描常见密钥模式..."
 FOUND_SECRETS=0
 
 # 扫描目录
-SCAN_DIRS="app/ services/ providers/ cli/"
+SCAN_DIRS="src/ cli/ scripts/ docker/"
 
 # 1. API Key 模式 (sk-xxx)
 log_info "检查 API Key 模式 (sk-...)..."

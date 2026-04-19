@@ -17,7 +17,7 @@ server:
   # 🔒 安全：CORS 配置
   cors_origins:
     - "http://localhost:3000"
-    - "http://localhost:8080"
+    - "http://localhost:19377"
 
 # 模型提供商配置
 providers:

@@ -21,6 +21,8 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
+from config import get_default_port
+
 # 添加 src 到路径
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
@@ -60,7 +62,7 @@ class SetupWizard:
             'version': '2.1.0',
             'server': {
                 'host': '0.0.0.0',
-                'port': 8080,
+                'port': get_default_port(),
                 'debug': False
             },
             'providers': [],  # 多个提供商配置
@@ -171,8 +173,9 @@ class SetupWizard:
             print(f"\n{Colors.CYAN}请选择操作:{Colors.ENDC}")
             print(f"  1. 添加预设 Provider (阿里云/OpenAI/等)")
             print(f"  2. 添加自定义 Provider (Base URL + 模型)")
-            print(f"  3. 修改已有 Provider")
-            print(f"  4. 删除已有 Provider")
+            if self.config['providers']:
+                print(f"  3. 修改已有 Provider")
+                print(f"  4. 删除已有 Provider")
             print(f"  5. 完成 Provider 配置，继续下一步")
             print(f"  0. 跳过/不修改，保持当前状态")
             
@@ -183,9 +186,15 @@ class SetupWizard:
             elif choice == '2':
                 self._add_custom_provider()
             elif choice == '3':
-                self._modify_provider()
+                if self.config['providers']:
+                    self._modify_provider()
+                else:
+                    print(f"{Colors.YELLOW}⚠️  暂无可修改的 Provider{Colors.ENDC}")
             elif choice == '4':
-                self._delete_provider()
+                if self.config['providers']:
+                    self._delete_provider()
+                else:
+                    print(f"{Colors.YELLOW}⚠️  暂无可删除的 Provider{Colors.ENDC}")
             elif choice == '5':
                 if not self.config['providers']:
                     print(f"{Colors.RED}❌ 至少配置一个 Provider 才能继续{Colors.ENDC}")
@@ -511,9 +520,6 @@ class SetupWizard:
                     full_id = f"{provider_name}/{model_id}"
                     available_models.append(full_id)
         
-        # 添加智能路由选项
-        available_models.insert(0, "smart")
-        
         if not available_models:
             print(f"{Colors.RED}❌ 没有可用的模型，请先配置 Provider{Colors.ENDC}")
             return
@@ -529,30 +535,31 @@ class SetupWizard:
         
         for key, scenario in scenarios.items():
             print(f"\n{scenario['name']} ({scenario['desc']}):")
-            print(f"  可用模型：smart (智能路由), {', '.join(available_models[1:][:5])}...")
-            model = input(f"  选择模型 (输入 smart 或模型 ID，回车=smart): ").strip()
-            if not model:
-                model = 'smart'
+            preview_models = ', '.join(available_models[:5])
+            suffix = '...' if len(available_models) > 5 else ''
+            print(f"  可用模型：{preview_models}{suffix}")
+            default_model = available_models[0]
+            while True:
+                model = input(f"  选择模型 (输入模型 ID，回车={default_model}): ").strip()
+                if not model:
+                    model = default_model
+                if model in available_models:
+                    break
+                print(f"  {Colors.RED}✗ 请输入已配置的模型 ID{Colors.ENDC}")
             self.config['scenarios'][key] = {'enabled': True, 'model': model}
         
         print(f"\n{Colors.GREEN}✅ 场景化模型配置完成{Colors.ENDC}")
-        print(f"   提示：设置为 'smart' 时，系统会根据任务类型自动选择最优模型")
+        print(f"   提示：场景配置只允许选择已配置的具体模型，避免路由配置自引用")
     
     def _select_routing(self):
         """选择路由策略"""
         print(f"\n{Colors.BOLD}🔀 步骤 3/4: 选择路由策略{Colors.ENDC}")
         print(f"{'-'*60}\n")
-        
-        print("  1. Fallback (故障转移)")
-        print("  2. Load Balance (负载均衡)")
-        print("  3. Priority (优先级)")
-        print("  4. Round Robin (轮询)")
-        
-        choice = input(f"\n请选择 [1-4] (回车=1): ").strip()
-        strategies = {'1': 'fallback', '2': 'load_balance', '3': 'priority', '4': 'round_robin'}
-        self.config['routing']['strategy'] = strategies.get(choice, 'fallback')
-        
-        print(f"\n{Colors.GREEN}✅ 路由策略：{self.config['routing']['strategy']}{Colors.ENDC}")
+
+        self.config['routing']['strategy'] = 'fallback'
+        print("  首次配置默认采用 Fallback（故障转移）策略。")
+        print("  如需更高级的策略，请在配置文件或后续 CLI 中调整。")
+        print(f"\n{Colors.GREEN}✅ 路由策略：fallback{Colors.ENDC}")
     
     def _generate_auth(self):
         """生成认证信息"""
@@ -608,8 +615,10 @@ class SetupWizard:
         
         try:
             log_file = open(self.config_dir / 'server.log', 'a')
+            host = self.config['server'].get('host', '0.0.0.0')
+            port = str(self.config['server'].get('port', get_default_port()))
             process = subprocess.Popen(
-                [python_exe, '-m', 'uvicorn', 'app.main:app', '--host', '0.0.0.0', '--port', '8080'],
+                [python_exe, '-m', 'uvicorn', 'bridge_server.runtime:app', '--app-dir', 'src', '--host', host, '--port', port],
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
                 cwd=REPO_ROOT
@@ -618,10 +627,10 @@ class SetupWizard:
             
             print(f"{Colors.GREEN}✅ 服务已启动！{Colors.ENDC}")
             print(f"   PID: {process.pid}")
-            print(f"   端口：8080")
+            print(f"   端口：{port}")
         except Exception as e:
             print(f"{Colors.YELLOW}⚠️  服务启动失败：{e}{Colors.ENDC}")
-            print(f"   可以手动启动：python -m uvicorn app.main:app --host 0.0.0.0 --port 8080")
+            print(f"   可以手动启动：python -m uvicorn bridge_server.runtime:app --app-dir src --host {host} --port {port}")
     
     def _finish(self):
         """完成"""

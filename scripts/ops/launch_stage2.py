@@ -62,7 +62,7 @@ class Stage2Launcher:
             ("项目根目录", project_root.exists()),
             ("runtime module", (project_root / "src" / "bridge_server" / "runtime.py").exists()),
             ("连接池模块", (project_root / "src" / "bridge_server" / "utils" / "connection_pools.py").exists()),
-            ("Provider v2", (project_root / "src" / "bridge_server" / "providers" / "base_v2.py").exists())
+            ("Provider base", (project_root / "src" / "bridge_server" / "providers" / "base.py").exists())
         ]
         
         print("\n🔍 系统要求检查:")
@@ -235,12 +235,12 @@ class Stage2Launcher:
                     logger.info(f"Mock server: {self.path}")
         
         # 启动HTTP服务器
-        server = HTTPServer(('localhost', 8000), MockHandler)
+        server = HTTPServer(('localhost', 19377), MockHandler)
         self.running = True
         
         def run_server():
-            logger.info("✅ 模拟服务器启动在 http://localhost:8000")
-            logger.info("📖 API文档: http://localhost:8000/ (简化版)")
+            logger.info("✅ 模拟服务器启动在 http://localhost:19377")
+            logger.info("📖 API文档: http://localhost:19377/ (简化版)")
             try:
                 server.serve_forever()
             except KeyboardInterrupt:
@@ -269,11 +269,13 @@ class Stage2Launcher:
             sys.executable,
             "-m",
             "uvicorn",
-            "app.main:app",
+            "bridge_server.runtime:app",
+            "--app-dir",
+            "src",
             "--host",
             "127.0.0.1",
             "--port",
-            "8000"
+            "19377"
         ]
         
         try:
@@ -335,7 +337,7 @@ class Stage2Launcher:
         
         while time.time() < deadline:
             try:
-                with urlopen("http://localhost:8000/health", timeout=2) as response:
+                with urlopen("http://localhost:19377/health", timeout=2) as response:
                     if response.status == 200:
                         return True
             except URLError:

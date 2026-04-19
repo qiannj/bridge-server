@@ -40,8 +40,8 @@ RUN groupadd --gid 1000 bridge && \
 WORKDIR /app
 
 # 复制应用代码
+COPY --chown=bridge:bridge src/ ./src/
 COPY --chown=bridge:bridge app/ ./app/
-COPY --chown=bridge:bridge services/ ./services/
 COPY --chown=bridge:bridge requirements.txt .
 
 # 创建日志和配置目录（使用用户目录）
@@ -56,10 +56,10 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import httpx; httpx.get('http://localhost:8080/health', timeout=5)" || exit 1
+    CMD python -c "import httpx; httpx.get('http://localhost:19377/health', timeout=5)" || exit 1
 
 # 暴露端口
-EXPOSE 8080
+EXPOSE 19377
 
 # 启动命令（端口可通过环境变量配置）
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "19377", "--workers", "1"]
+CMD ["python", "-m", "uvicorn", "bridge_server.runtime:app", "--app-dir", "src", "--host", "0.0.0.0", "--port", "19377", "--workers", "1"]

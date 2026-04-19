@@ -75,7 +75,7 @@ docker-compose up -d
 sudo nano /etc/systemd/system/bridge-server.service
 
 # 2. 修改 ExecStart
-ExecStart=/usr/bin/python3 -m uvicorn app.main:app \
+ExecStart=/usr/bin/python3 -m uvicorn bridge_server.runtime:app --app-dir src \
   --host 0.0.0.0 \
   --port 19377 \
   --workers 1
@@ -94,7 +94,7 @@ curl http://localhost:19377/health
 
 ```bash
 # 方式 A: 命令行参数
-python -m uvicorn app.main:app --host 0.0.0.0 --port 19377
+python -m uvicorn bridge_server.runtime:app --app-dir src --host 0.0.0.0 --port 19377
 
 # 方式 B: 配置文件
 # 编辑 ~/.bridge-server/config.yaml
@@ -102,8 +102,8 @@ server:
   port: 19377
 
 # 方式 C: 环境变量
-export BRIDGE_PORT=19377
-python -m uvicorn app.main:app
+export PORT=19377
+python -m uvicorn bridge_server.runtime:app --app-dir src
 ```
 
 ---

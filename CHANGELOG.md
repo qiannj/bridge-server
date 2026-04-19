@@ -9,7 +9,7 @@
 ### 🧹 仓库收敛与文档整合
 
 - ✅ 将 `src/bridge_server/runtime.py` 固化为唯一运行时实现
-- ✅ 将 `app.main:app` 与 `main_v2.py` 收敛为兼容包装层
+- ✅ 将 `bridge_server.runtime:app` 固化为唯一启动入口，并删除 `app.main:app` / `main_v2*.py` 并行包装层
 - ✅ 在主运行时补齐 `/ready`、`/api/models`、`/api/routing`、`/api/usage`、`/api/budget`
 - ✅ 删除阶段性脚本、历史总结文档、过期 quickstart 与旧版测试
 - ✅ 将仓库文档收敛为 `README / INSTALL / USAGE / CHANGELOG / TODO`
@@ -19,7 +19,7 @@
 
 - 活跃代码路径集中到 `src/bridge_server/` 与 `scripts/{ops,bench,verify,security}/`
 - 旧版 `app.auth`、`app.router`、`services/*` 和 `app/api/v1` 不再保留
-- 外部启动方式仍可继续使用 `app.main:app`
+- 外部启动方式统一为 `bridge_server.runtime:app`
 
 ---
 
@@ -41,8 +41,8 @@
 #### 配置向导 (`cli/setup-wizard.py`)
 - ✅ 自动收集所有已配置的 Provider 和模型
 - ✅ 生成完整模型 ID 列表（格式：`provider/model-id`）
-- ✅ 添加 "smart" 选项作为默认推荐
-- ✅ 防止输入错误（拼写错误、不存在的模型）
+- ✅ 场景配置只允许选择已配置的具体模型，不再暴露 `smart` 伪模型
+- ✅ 首次安装默认采用 `fallback`，隐藏不必要的复杂路由选择
 
 #### 路由逻辑 (`app/router.py`)
 - ✅ `route_model()` 支持 `requested_model` 参数
@@ -50,7 +50,7 @@
 - ✅ 其他值使用默认路由策略（向后兼容）
 - ✅ 优先使用配置中的 `model_mapping`
 
-#### 请求处理 (`app/main.py`)
+#### 请求处理 (`src/bridge_server/runtime.py`)
 - ✅ 支持 `stream: true` 参数
 - ✅ 性能追踪日志（3 个阶段）
 - ✅ 错误响应返回详细 JSON 信息

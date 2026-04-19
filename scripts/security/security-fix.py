@@ -52,10 +52,10 @@ def fix_jwt_secret_in_auth_py():
     print("✅ auth.py 修复完成")
 
 def fix_rate_limit_in_main_py():
-    """修复 main.py 中的速率限制问题"""
-    print("🔒 修复 main.py 中的速率限制...")
+    """修复 runtime.py 中的速率限制问题"""
+    print("🔒 修复 runtime.py 中的速率限制...")
     
-    main_file = Path("/home/pi/.openclaw/workspace/bridge-server-product/app/main.py")
+    main_file = Path("/home/pi/.openclaw/workspace/bridge-server-product/src/bridge_server/runtime.py")
     content = main_file.read_text(encoding='utf-8')
     
     # 修复速率限制配置
@@ -64,18 +64,18 @@ def fix_rate_limit_in_main_py():
     content = content.replace(old_limit, new_limit)
     
     main_file.write_text(content, encoding='utf-8')
-    print("✅ main.py 修复完成")
+    print("✅ runtime.py 修复完成")
 
 def fix_cors_in_main_py():
-    """修复 main.py 中的 CORS 配置"""
-    print("🔒 修复 main.py 中的 CORS 配置...")
+    """修复 runtime.py 中的 CORS 配置"""
+    print("🔒 修复 runtime.py 中的 CORS 配置...")
     
-    main_file = Path("/home/pi/.openclaw/workspace/bridge-server-product/app/main.py")
+    main_file = Path("/home/pi/.openclaw/workspace/bridge-server-product/src/bridge_server/runtime.py")
     content = main_file.read_text(encoding='utf-8')
     
     # 修复 CORS 配置 - 默认禁止所有
     old_cors = '''allowed_origins = server_config.get(
-    "cors_origins", ["http://localhost:3000", "http://localhost:8080"]
+    "cors_origins", ["http://localhost:3000", "http://localhost:19377"]
 )'''
     
     new_cors = '''# 🔒 安全：默认禁止所有跨域请求

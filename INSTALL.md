@@ -11,7 +11,7 @@
 ```bash
 python -m venv .venv
 source .venv/bin/activate          # Windows: .\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt -r requirements-v2.txt
+pip install -r requirements.txt
 
 # 设置 Provider API Key（至少一个）
 export DASHSCOPE_API_KEY=sk-xxx    # Windows: $env:DASHSCOPE_API_KEY="sk-xxx"
@@ -70,11 +70,7 @@ docker compose logs | grep "Admin token"
 python -m uvicorn bridge_server.runtime:app --app-dir src --host 127.0.0.1 --port 19377
 ```
 
-兼容入口：
-
-```bash
-python -m uvicorn main_v2:app --host 127.0.0.1 --port 19377
-```
+Bridge Server 现已收敛为单一运行入口，不再保留 `main_v2.py` / `main_v2_async.py` 并行启动方式。
 
 ## 验证
 
@@ -113,5 +109,5 @@ Authorization: Bearer <token>
 
 ```bash
 python -m pip install --upgrade pip
-pip install -r requirements.txt -r requirements-v2.txt
+pip install -r requirements.txt
 ```

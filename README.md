@@ -9,8 +9,7 @@
 ## 当前状态
 
 - **唯一运行时实现**：`src/bridge_server/runtime.py`
-- **稳定启动入口**：`app.main:app`
-- **兼容入口**：`main_v2.py`、`main_v2_async.py`
+- **唯一启动入口**：`bridge_server.runtime:app`
 - **核心代码位置**：`src/bridge_server/`
 - **脚本归类**：`scripts/ops`、`scripts/bench`、`scripts/verify`、`scripts/security`
 
@@ -40,12 +39,12 @@
 - **智能模型路由**：根据任务类型自动选模型
 - **用量与预算控制**：`/api/usage`、`/api/budget`
 - **健康与观测**：`/health`、`/ready`、`/metrics`、`/metrics/prometheus`、`/stats`
-- **兼容包装层**：保留原启动方式，但业务主线集中到 `src/bridge_server/`
+- **单一路径运行时**：业务主线、启动入口、Provider 基类统一集中到 `src/bridge_server/`
 
 ## 快速开始
 
 ```bash
-pip install -r requirements.txt -r requirements-v2.txt
+pip install -r requirements.txt
 
 # 设置至少一个 Provider API Key
 export DASHSCOPE_API_KEY=sk-xxx
@@ -77,7 +76,7 @@ curl -X POST http://127.0.0.1:19377/v1/chat/completions \
 
 ```text
 Client
-  -> app.main:app
+  -> bridge_server.runtime:app
   -> src/bridge_server/runtime.py
   -> src/bridge_server/providers/
   -> src/bridge_server/services/routing/

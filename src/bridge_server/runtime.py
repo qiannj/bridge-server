@@ -64,6 +64,30 @@ cache_system: Optional[HybridCache] = None
 usage_tracker: Optional[UsageTrackerAsync] = None
 auth_manager: Optional[AsyncAuthManager] = None
 runtime_config: Dict[str, Any] = {}
+
+
+def _resolve_config_dir() -> Path:
+    """Resolve config dir from env vars with backward compatibility."""
+    for env_name in ("BRIDGE_SERVER_CONFIG_DIR", "BRIDGE_CONFIG_DIR"):
+        env_value = os.getenv(env_name)
+        if env_value:
+            return Path(env_value)
+    return Path.home() / ".bridge-server"
+
+
+def _resolve_provider_routing_strategy(config: Dict[str, Any]) -> RoutingStrategy:
+    """Map user-facing routing config to ProviderManager strategies."""
+    configured = str(config.get("routing", {}).get("strategy", "fallback")).strip().lower()
+    mapping = {
+        "fallback": RoutingStrategy.MANUAL,
+        "priority": RoutingStrategy.MANUAL,
+        "manual": RoutingStrategy.MANUAL,
+        "round_robin": RoutingStrategy.ROUND_ROBIN,
+        "load_balance": RoutingStrategy.LOWEST_LATENCY,
+        "lowest_latency": RoutingStrategy.LOWEST_LATENCY,
+        "cost_optimized": RoutingStrategy.COST_OPTIMIZED,
+    }
+    return mapping.get(configured, RoutingStrategy.MANUAL)
 perf_monitor = PerformanceMonitor()
 metrics_collector = get_metrics_collector()
 connection_pool_manager = None
@@ -72,7 +96,7 @@ connection_pool_manager = None
 async def load_config_async() -> Dict[str, Any]:
     """异步加载配置"""
     config_paths = [
-        Path.home() / ".bridge-server" / "config.yaml",
+        _resolve_config_dir() / "config.yaml",
         Path(__file__).resolve().parents[2] / "config.yaml.example"
     ]
     
@@ -123,7 +147,7 @@ async def initialize_system():
     
     # 4. 初始化Provider管理器
     logger.info("初始化Provider系统...")
-    provider_manager = ProviderManager(routing_strategy=RoutingStrategy.COST_OPTIMIZED)
+    provider_manager = ProviderManager(routing_strategy=_resolve_provider_routing_strategy(runtime_config))
     
     # 添加Providers
     providers_config = [
@@ -478,14 +502,13 @@ async def get_models_catalog():
 
 @app.get("/api/routing")
 async def get_routing_config():
-    """Expose the active routing strategy and configured mappings."""
+    """Expose configured routing and the effective provider-manager strategy."""
     routing_config = runtime_config.get("routing", {})
-    strategy = routing_config.get(
-        "strategy",
-        provider_manager.routing_strategy.value if provider_manager else "cost_optimized",
-    )
+    configured_strategy = routing_config.get("strategy", "fallback")
+    effective_strategy = provider_manager.routing_strategy.value if provider_manager else _resolve_provider_routing_strategy(runtime_config).value
     return {
-        "strategy": strategy,
+        "strategy": configured_strategy,
+        "effective_strategy": effective_strategy,
         "model_mapping": routing_config.get("model_mapping", {}),
     }
 
@@ -866,7 +889,7 @@ if __name__ == "__main__":
     
     config = {
         "host": os.getenv("HOST", "0.0.0.0"),  # nosec B104 — intentional server bind; restrict via HOST env var in production
-        "port": int(os.getenv("PORT", "8000")),
+        "port": int(os.getenv("PORT", "19377")),
         "reload": False,
         "workers": 1,
         "access_log": False,  # 禁用访问日志提升性能

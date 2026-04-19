@@ -7,6 +7,6 @@ global:
 scrape_configs:
   - job_name: 'bridge-server'
     static_configs:
-      - targets: ['bridge-server:8080']
+      - targets: ['bridge-server:19377']
     metrics_path: '/metrics/prometheus'
     scrape_interval: 10s

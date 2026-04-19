@@ -100,7 +100,7 @@ nano config/config.yaml
 ./deploy.sh logs
 
 # 测试 API
-curl http://localhost:8080/health
+curl http://localhost:19377/health
 ```
 
 ---
@@ -191,7 +191,7 @@ MOONSHOT_API_KEY=sk-xxx
 OPENAI_API_KEY=sk-xxx
 
 # 服务器配置
-BRIDGE_PORT=8080
+BRIDGE_PORT=19377
 BRIDGE_DEBUG=false
 LOG_LEVEL=INFO
 
@@ -204,7 +204,7 @@ RATE_LIMIT_PER_MINUTE=100
 ```yaml
 server:
   host: 0.0.0.0  # Docker 中必须监听所有接口
-  port: 8080
+  port: 19377
   auth_tokens:
     - "your-secret-token"
 
@@ -313,12 +313,12 @@ docker exec bridge-server env | grep DASHSCOPE
 
 ```bash
 # 查看端口占用
-lsof -i :8080
+lsof -i :19377
 
 # 修改端口
 # 编辑 docker-compose.yml
 ports:
-  - "8081:8080"  # 改为 8081
+  - "8081:19377"  # 改为 8081
 ```
 
 ### 内存不足
@@ -465,7 +465,7 @@ cd docker
 ./deploy.sh start
 
 # 6. 验证
-curl http://localhost:8080/health
+curl http://localhost:19377/health
 ```
 
 ---

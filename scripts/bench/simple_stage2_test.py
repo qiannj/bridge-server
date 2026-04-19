@@ -18,7 +18,7 @@ from typing import Dict, Any, List
 class SimplePerformanceTest:
     """简化性能测试类"""
     
-    def __init__(self, base_url: str = "http://localhost:8000"):
+    def __init__(self, base_url: str = "http://localhost:19377"):
         self.base_url = base_url
         self.results = []
     

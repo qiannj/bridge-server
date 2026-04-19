@@ -183,8 +183,9 @@ def cmd_start():
     import subprocess
     import sys
     log_file = open(LOG_FILE, 'a')
+    port = str(get_default_port())
     subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"],
+        [sys.executable, "-m", "uvicorn", "bridge_server.runtime:app", "--app-dir", "src", "--host", "0.0.0.0", "--port", port],
         stdout=log_file,
         stderr=subprocess.STDOUT,
         start_new_session=True
@@ -249,8 +250,9 @@ def cmd_stop():
         except Exception:
             pass
     
-    # 最后手段：pkill
-    os.system("pkill -f 'uvicorn app.main:app' 2>/dev/null || true")
+    # 最后手段：pkill（静态命令，无用户输入）
+    subprocess.run(["pkill", "-f", "uvicorn bridge_server.runtime:app"], check=False, capture_output=True, text=True)
+    subprocess.run(["pkill", "-f", "uvicorn app.main:app"], check=False, capture_output=True, text=True)
     print_success("服务已停止")
 
 def cmd_restart():

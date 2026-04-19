@@ -7,6 +7,11 @@ pydantic>=2.0.0
 
 # HTTP 客户端
 httpx>=0.25.0
+aiohttp>=3.9.0
+
+# 异步文件与数据库
+aiofiles>=23.2.1
+aiosqlite>=0.19.0
 
 # 配置管理
 pyyaml>=6.0
@@ -26,12 +31,17 @@ passlib[bcrypt]>=1.7.4
 mysql-connector-python>=8.2.0
 sqlalchemy>=2.0.0
 redis>=5.0.0
+cachetools>=5.0.0
 
 # 监控（可选）
 prometheus-client>=0.19.0
 
 # 日志
 python-json-logger>=2.0.0
+structlog>=23.0.0
+
+# 重试
+tenacity>=8.0.0
 
 # JS 沙箱（v1.6.0 新增）
 restrictedpython>=6.3

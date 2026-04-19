@@ -103,7 +103,7 @@ fi
 
 # 检查 standalone 支持
 if grep -q "nohup" install.sh && \
-   grep -q "uvicorn app.main:app" install.sh; then
+   grep -q "uvicorn bridge_server.runtime:app" install.sh; then
     test_pass "支持通用后台进程模式"
 else
     test_fail "缺少通用后台进程模式支持"
