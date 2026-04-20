@@ -107,7 +107,7 @@ class OpenAIProvider(BaseProvider):
         return result
     
     async def _make_stream_request(self, messages: list, model: str = None, **kwargs) -> AsyncGenerator[str, None]:
-        """发起OpenAI流式请求"""
+        """发起OpenAI流式请求，支持 reasoning_content（思维链模型）"""
         model = model or "gpt-3.5-turbo"
         
         payload = {
@@ -118,7 +118,12 @@ class OpenAIProvider(BaseProvider):
             "temperature": kwargs.get("temperature", 0.7),
             "top_p": kwargs.get("top_p", 1.0),
         }
-        
+
+        # 传递 stream_options（OpenAI 及兼容 API 支持，让末尾 chunk 携带 usage）
+        stream_options = kwargs.get("stream_options")
+        if stream_options:
+            payload["stream_options"] = stream_options
+
         # 移除None值
         payload = {k: v for k, v in payload.items() if v is not None}
         
@@ -145,8 +150,16 @@ class OpenAIProvider(BaseProvider):
                         
                         # 添加provider标识
                         chunk["provider"] = "openai"
+
+                        # 规范化 delta：确保 reasoning_content 字段存在（方便客户端处理）
+                        for choice in chunk.get("choices", []):
+                            delta = choice.get("delta", {})
+                            # 若上游有 reasoning_content，保留；否则不添加（避免污染普通模型输出）
+                            rc = delta.get("reasoning_content")
+                            if rc is not None:
+                                delta["reasoning_content"] = rc
                         
-                        yield json.dumps(chunk)
+                        yield json.dumps(chunk, ensure_ascii=False)
                     
                     except json.JSONDecodeError:
                         continue

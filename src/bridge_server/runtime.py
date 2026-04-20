@@ -704,7 +704,11 @@ async def chat_completions(
                     req_dict=req_dict,
                     perf_start=perf_start
                 ),
-                media_type="text/plain"
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "X-Accel-Buffering": "no",  # 禁止 nginx 缓冲，确保实时推送
+                }
             )
         else:
             # 普通响应
@@ -819,41 +823,66 @@ async def _stream_chat_completion(
     req_dict: Dict[str, Any],
     perf_start: float
 ):
-    """流式聊天完成"""
+    """流式聊天完成，支持 reasoning_content（思维链模型）实时流出"""
     llm_start = time.perf_counter()
+
+    routing_info = {
+        "task_type": route_result.task_type.value,
+        "selected_model": route_result.model,
+        "provider": route_result.provider_id,
+        "reason": route_result.reason,
+        "from_cache": route_result.from_cache,
+        "confidence": route_result.confidence,
+    }
 
     try:
         if not provider_manager:
             raise RuntimeError("Provider管理器未初始化")
-        
-        # 开始流式调用
-        total_tokens = 0
-        
+
+        first_chunk = True
+        prompt_tokens = 0
+        completion_tokens = 0
+        reasoning_chars = 0  # 追踪 reasoning_content 总长度（用于日志）
+
         async for chunk in provider_manager.chat_completion_stream(
             messages=messages,
             model=route_result.model,
             provider_id=route_result.provider_id,
             max_tokens=req_dict.get("max_tokens", 4000),
-            temperature=req_dict.get("temperature", 0.7)
+            temperature=req_dict.get("temperature", 0.7),
+            stream_options={"include_usage": True},  # 要求上游在流结束时返回 usage
         ):
-            # 统计token使用
-            payload = chunk
+            # 解析 chunk
             if isinstance(chunk, str):
                 try:
                     payload = json.loads(chunk)
                 except json.JSONDecodeError:
-                    payload = chunk
-            
-            if isinstance(payload, dict) and "usage" in payload:
-                total_tokens += payload["usage"].get("completion_tokens", 0)
-            
-            if isinstance(payload, dict):
-                body = json.dumps(payload, ensure_ascii=False)
+                    yield f"data: {chunk}\n\n"
+                    continue
             else:
-                body = payload
-            
-            yield f"data: {body}\n\n"
-        
+                payload = chunk
+
+            # 累计 token 使用量（上游在最后一个 chunk 携带 usage 字段）
+            if isinstance(payload, dict) and "usage" in payload and payload["usage"]:
+                usage = payload["usage"]
+                prompt_tokens = usage.get("prompt_tokens", prompt_tokens)
+                completion_tokens = usage.get("completion_tokens", completion_tokens)
+
+            # 统计 reasoning_content 字符数（用于日志）
+            if isinstance(payload, dict):
+                for choice in payload.get("choices", []):
+                    delta = choice.get("delta", {})
+                    rc = delta.get("reasoning_content") or ""
+                    reasoning_chars += len(rc)
+
+            # 将路由信息注入到第一个有效 chunk（让客户端知道路由决策）
+            if first_chunk and isinstance(payload, dict):
+                first_chunk = False
+                payload.setdefault("usage", {})
+                payload["usage"]["routing"] = routing_info
+
+            yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
         llm_time = (time.perf_counter() - llm_start) * 1000
         metrics_collector.record_llm_call(
             route_result.provider_id,
@@ -861,26 +890,24 @@ async def _stream_chat_completion(
             "success",
             llm_time / 1000,
         )
-        if total_tokens:
+        if completion_tokens:
             metrics_collector.record_token_usage(
                 route_result.provider_id,
                 route_result.model,
-                0,
-                total_tokens,
+                prompt_tokens,
+                completion_tokens,
             )
-        
-        # 异步记录流式请求用量
+
         asyncio.create_task(_record_usage_background(
             route_result=route_result,
-            usage_info={"completion_tokens": total_tokens, "prompt_tokens": 0},
+            usage_info={"completion_tokens": completion_tokens, "prompt_tokens": prompt_tokens},
             current_user=current_user,
             duration_ms=llm_time
         ))
-        
+
         # 发送结束标记
         yield "data: [DONE]\n\n"
-        
-        # 记录性能
+
         total_time = (time.perf_counter() - perf_start) * 1000
         logger.info(
             "stream_completion_finished",
@@ -888,8 +915,11 @@ async def _stream_chat_completion(
             model=route_result.model,
             total_duration_ms=round(total_time, 2),
             llm_duration_ms=round(llm_time, 2),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            reasoning_chars=reasoning_chars,
         )
-        
+
     except Exception as e:
         metrics_collector.record_llm_call(
             route_result.provider_id,
