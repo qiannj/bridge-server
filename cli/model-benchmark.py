@@ -120,7 +120,7 @@ BENCHMARK_QUESTIONS: Dict[str, List[Dict]] = {
         },
         {
             "id": "trans_3",
-            "prompt": "请将以下句子分别翻译成日语和法语：\n"春天来了，万物复苏。"",
+            "prompt": "请将以下句子分别翻译成日语和法语：\n「春天来了，万物复苏。」",
             "check": lambda r: bool(re.search(r"春|春天|printemps|春が|haru", r, re.I)),
             "check_desc": "包含日语或法语的春天表达",
         },
