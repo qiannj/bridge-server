@@ -59,35 +59,32 @@ def select_from_list(title: str, options: list, default_index: int = 0) -> str:
     def _arrow_select():
         import tty, termios
         idx = default_index
+        n = len(options)
 
-        def render():
-            # 每次重新渲染：上移已打印行
-            lines = len(options) + 1
-            sys.stdout.write(f"\033[{lines}A\033[J")
-            print(f"  {Colors.CYAN}{title}{Colors.ENDC}")
-            for i, opt in enumerate(options):
-                if i == idx:
-                    print(f"  {Colors.GREEN}❯ {opt}{Colors.ENDC}")
-                else:
-                    print(f"    {opt}")
+        def out(s):
+            sys.stdout.write(s)
             sys.stdout.flush()
 
-        # 首次打印
-        print(f"  {Colors.CYAN}{title}{Colors.ENDC}")
-        for i, opt in enumerate(options):
-            if i == idx:
-                print(f"  {Colors.GREEN}❯ {opt}{Colors.ENDC}")
-            else:
-                print(f"    {opt}")
-        sys.stdout.flush()
+        def render(first=False):
+            if not first:
+                # 上移 (n+1) 行回到标题行首，清屏到底
+                out(f"\033[{n + 1}A\r\033[J")
+            # 在 raw 模式下必须用 \r\n，不能用 print()
+            out(f"  \033[36m{title}\033[0m\r\n")
+            for i, opt in enumerate(options):
+                if i == idx:
+                    out(f"  \033[32m❯ {opt}\033[0m\r\n")
+                else:
+                    out(f"    {opt}\r\n")
 
         fd = sys.stdin.fileno()
         old = termios.tcgetattr(fd)
         try:
             tty.setraw(fd)
+            render(first=True)
             while True:
                 ch = sys.stdin.read(1)
-                if ch == '\r' or ch == '\n':
+                if ch in ('\r', '\n'):
                     break
                 elif ch == '\x03':  # Ctrl+C
                     raise KeyboardInterrupt
@@ -96,13 +93,13 @@ def select_from_list(title: str, options: list, default_index: int = 0) -> str:
                     if ch2 == '[':
                         ch3 = sys.stdin.read(1)
                         if ch3 == 'A':  # Up
-                            idx = (idx - 1) % len(options)
+                            idx = (idx - 1) % n
                         elif ch3 == 'B':  # Down
-                            idx = (idx + 1) % len(options)
+                            idx = (idx + 1) % n
                 render()
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
-        print()  # 换行
+        out("\r\n")
         return options[idx]
 
     def _numeric_select():
