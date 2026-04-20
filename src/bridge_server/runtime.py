@@ -15,6 +15,15 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 import yaml
 
+# 启动时加载 .env 文件（~/.bridge-server/.env）
+try:
+    from dotenv import load_dotenv
+    _env_file = Path.home() / ".bridge-server" / ".env"
+    if _env_file.exists():
+        load_dotenv(_env_file, override=False)
+except ImportError:
+    pass
+
 from fastapi import FastAPI, Request, Depends, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse, Response
@@ -88,6 +97,90 @@ def _resolve_provider_routing_strategy(config: Dict[str, Any]) -> RoutingStrateg
         "cost_optimized": RoutingStrategy.COST_OPTIMIZED,
     }
     return mapping.get(configured, RoutingStrategy.MANUAL)
+
+
+# provider name → provider_type 映射（已知的专用 provider）
+_PROVIDER_TYPE_MAP = {
+    "dashscope": "dashscope",
+    "moonshot": "moonshot",
+}
+
+def _build_providers_config(config: Dict[str, Any]) -> List[ProviderConfig]:
+    """从 config.yaml 的 providers 列表动态构建 ProviderConfig。
+
+    每条 provider 配置格式：
+      name: dashscope
+      base_url: https://...
+      api_key_env: DASHSCOPE_API_KEY   # 从环境变量读取
+      api_key: sk-xxx                  # 或直接内嵌（自定义 provider）
+      models: [...]
+    """
+    yaml_providers = config.get("providers", [])
+
+    # 若 config.yaml 中没有 providers 段，回退到环境变量兜底
+    if not yaml_providers:
+        logger.info("config.yaml 中无 providers 配置，回退到环境变量兜底")
+        return _fallback_providers_config()
+
+    result: List[ProviderConfig] = []
+    for idx, p in enumerate(yaml_providers):
+        name = p.get("name", f"provider_{idx}")
+        base_url = p.get("base_url", "")
+
+        # 解析 API Key：优先 api_key_env，其次 api_key 直接值
+        api_key_env = p.get("api_key_env", "")
+        api_key = os.getenv(api_key_env) if api_key_env else None
+        if not api_key:
+            api_key = p.get("api_key", "")
+
+        provider_type = _PROVIDER_TYPE_MAP.get(name, "openai")
+        enabled = bool(api_key)
+
+        if not enabled:
+            logger.debug(f"Provider '{name}' 未配置 API Key，跳过")
+            continue
+
+        result.append(ProviderConfig(
+            provider_type=provider_type,
+            config={
+                "id": name,
+                "api_key": api_key,
+                "base_url": base_url,
+                "models": [m.get("id") for m in p.get("models", []) if m.get("id")],
+            },
+            weight=max(1, len(yaml_providers) - idx),
+            priority=idx + 1,
+            enabled=True,
+        ))
+        logger.info(f"✓ 从 config.yaml 读取 Provider: {name} ({provider_type})")
+
+    return result
+
+
+def _fallback_providers_config() -> List[ProviderConfig]:
+    """环境变量兜底配置（当 config.yaml 无 providers 时使用）。"""
+    return [
+        ProviderConfig(
+            provider_type="dashscope",
+            config={"id": "dashscope", "api_key": os.getenv("DASHSCOPE_API_KEY"),
+                    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"},
+            weight=3, priority=1, enabled=bool(os.getenv("DASHSCOPE_API_KEY"))
+        ),
+        ProviderConfig(
+            provider_type="openai",
+            config={"id": "openai", "api_key": os.getenv("OPENAI_API_KEY"),
+                    "base_url": os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")},
+            weight=2, priority=2, enabled=bool(os.getenv("OPENAI_API_KEY"))
+        ),
+        ProviderConfig(
+            provider_type="moonshot",
+            config={"id": "moonshot", "api_key": os.getenv("MOONSHOT_API_KEY"),
+                    "base_url": "https://api.moonshot.cn/v1"},
+            weight=1, priority=3, enabled=bool(os.getenv("MOONSHOT_API_KEY"))
+        ),
+    ]
+
+
 perf_monitor = PerformanceMonitor()
 metrics_collector = get_metrics_collector()
 connection_pool_manager = None
@@ -149,42 +242,8 @@ async def initialize_system():
     logger.info("初始化Provider系统...")
     provider_manager = ProviderManager(routing_strategy=_resolve_provider_routing_strategy(runtime_config))
     
-    # 添加Providers
-    providers_config = [
-        ProviderConfig(
-            provider_type="dashscope",
-            config={
-                "id": "dashscope",
-                "api_key": os.getenv("DASHSCOPE_API_KEY"),
-                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
-            },
-            weight=3,
-            priority=1,
-            enabled=bool(os.getenv("DASHSCOPE_API_KEY"))
-        ),
-        ProviderConfig(
-            provider_type="openai",
-            config={
-                "id": "openai",
-                "api_key": os.getenv("OPENAI_API_KEY"),
-                "base_url": os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-            },
-            weight=2,
-            priority=2,
-            enabled=bool(os.getenv("OPENAI_API_KEY"))
-        ),
-        ProviderConfig(
-            provider_type="moonshot",
-            config={
-                "id": "moonshot",
-                "api_key": os.getenv("MOONSHOT_API_KEY"),
-                "base_url": "https://api.moonshot.cn/v1"
-            },
-            weight=1,
-            priority=3,
-            enabled=bool(os.getenv("MOONSHOT_API_KEY"))
-        )
-    ]
+    # 从 config.yaml 动态加载 providers，兜底使用环境变量硬编码
+    providers_config = _build_providers_config(runtime_config)
     
     added_count = 0
     for config in providers_config:
