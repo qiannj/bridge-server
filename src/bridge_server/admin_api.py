@@ -199,21 +199,65 @@ async def update_provider(name: str, req: ProviderUpdateRequest):
     return {"ok": True}
 
 
+# Default patterns (mirrored from router.py for seeding new scenarios)
+_SCENARIO_DEFAULT_PATTERNS: Dict[str, List[str]] = {
+    'coding': [
+        r'代码|编程|函数|debug|bug|算法|程序|脚本|API|接口|实现|报错|错误|exception|syntax',
+        r'code|python|javascript|typescript|java|golang|cpp|rust|programming|function|debug|algorithm|script',
+    ],
+    'writing': [
+        r'写|文章|邮件|报告|文档|文案|润色|改写|撰写|起草|文稿|作文|创作',
+        r'write|article|email|report|document|essay|draft|rewrite|proofread|compose',
+    ],
+    'search': [
+        r'搜索|查找|查询|检索|找一下|查一下|哪里有|在哪|怎么找|有没有',
+        r'search|find|lookup|query|retrieve|where is|how to find|locate',
+    ],
+    'summary': [
+        r'总结|摘要|归纳|概括|提炼|压缩|简化|要点|精华|缩写',
+        r'summarize|summary|abstract|condense|brief|key points|tldr|recap',
+    ],
+    'translation': [
+        r'翻译|译成|译为|中译英|英译中|用.*语说|怎么说|转换语言|多语言',
+        r'translate|translation|in english|in chinese|in japanese|how do you say|language',
+    ],
+    'chat': [
+        r'你好|hi|hello|谢谢|再见|在吗|聊天|说说|讲讲|介绍一下|是什么|怎么样',
+        r'hello|hi|hey|thanks|bye|chat|tell me|what is|who is|explain|how are you',
+    ],
+}
+
+
+def _enrich_scenario(name: str, cfg: Any) -> Dict:
+    """Ensure a scenario dict has all required fields, filling in defaults."""
+    if not isinstance(cfg, dict):
+        cfg = {"model": str(cfg)}
+    patterns = cfg.get("patterns") or _SCENARIO_DEFAULT_PATTERNS.get(name, [])
+    return {
+        "enabled": cfg.get("enabled", True),
+        "model": cfg.get("model", ""),
+        "patterns": patterns,
+    }
+
+
 @router.get("/routing", dependencies=_deps)
 async def get_routing():
     config = _load_yaml(_get_config_dir() / "config.yaml")
     strategy = config.get("routing", {}).get("strategy", "fallback")
-    # scenarios 在 config.yaml 根层级，格式 {name: {enabled, model}} 或 {name: str}
     raw = config.get("scenarios", {})
-    scenarios: Dict[str, str] = {}
-    for k, v in raw.items():
-        scenarios[k] = v.get("model", "") if isinstance(v, dict) else str(v)
+    scenarios = {k: _enrich_scenario(k, v) for k, v in raw.items()}
     return {"strategy": strategy, "scenarios": scenarios}
+
+
+class ScenarioConfig(BaseModel):
+    enabled: bool = True
+    model: str = ""
+    patterns: List[str] = []
 
 
 class RoutingUpdateRequest(BaseModel):
     strategy: Optional[str] = None
-    scenarios: Optional[Dict[str, str]] = None
+    scenarios: Optional[Dict[str, ScenarioConfig]] = None
 
 
 @router.put("/routing", dependencies=_deps)
@@ -225,12 +269,22 @@ async def update_routing(req: RoutingUpdateRequest):
             config["routing"] = {}
         config["routing"]["strategy"] = req.strategy
     if req.scenarios is not None:
-        # 保存为与 setup wizard 一致的格式 {name: {enabled: true, model: str}}
         config["scenarios"] = {
-            k: {"enabled": True, "model": v}
-            for k, v in req.scenarios.items() if v
+            k: {
+                "enabled": v.enabled,
+                "model": v.model,
+                "patterns": v.patterns,
+            }
+            for k, v in req.scenarios.items()
         }
     _save_yaml(config_file, config)
+    # Hot-reload the running router
+    try:
+        from bridge_server import runtime as _rt
+        if _rt.smart_router is not None:
+            _rt.smart_router.reload(config.get("scenarios", {}))
+    except Exception:
+        pass
     return {"ok": True}
 
 

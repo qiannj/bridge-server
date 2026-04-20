@@ -53,7 +53,7 @@ from .observability import (
     render_prometheus_metrics,
     setup_structured_logging,
 )
-from .services.routing import RouterConfig, SmartRouter
+from .services.routing import SmartRouter
 from .utils.cache import HybridCache
 from .utils.connection_pools import close_connection_pool_manager, get_connection_pool_manager
 
@@ -261,8 +261,8 @@ async def initialize_system():
     
     # 5. 初始化智能路由
     logger.info("初始化智能路由...")
-    router_config = RouterConfig()
-    smart_router = SmartRouter(router_config, cache_system)
+    scenarios = runtime_config.get("scenarios", {})
+    smart_router = SmartRouter(scenarios, cache_system)
     
     # 6. 系统健康检查
     logger.info("执行系统健康检查...")
@@ -683,7 +683,7 @@ async def chat_completions(
         route_time = (time.perf_counter() - perf_route_start) * 1000
         bind_llm_context(provider_id=route_result.provider_id, model=route_result.model)
         metrics_collector.record_route_decision(
-            route_result.task_type.value,
+            route_result.task_type,
             route_result.provider_id,
             route_result.model,
             route_result.from_cache,
@@ -693,7 +693,7 @@ async def chat_completions(
             "route_selected",
             provider=route_result.provider_id,
             model=route_result.model,
-            task_type=route_result.task_type.value,
+            task_type=route_result.task_type,
             confidence=round(route_result.confidence, 3),
             from_cache=route_result.from_cache,
             duration_ms=round(route_time, 2),
@@ -766,7 +766,7 @@ async def chat_completions(
             # 6. 增强响应信息
             response.setdefault("usage", {})
             response["usage"]["routing"] = {
-                "task_type": route_result.task_type.value,
+                "task_type": route_result.task_type,
                 "selected_model": route_result.model,
                 "provider": route_result.provider_id,
                 "reason": route_result.reason,
@@ -835,7 +835,7 @@ async def _stream_chat_completion(
     llm_start = time.perf_counter()
 
     routing_info = {
-        "task_type": route_result.task_type.value,
+        "task_type": route_result.task_type,
         "selected_model": route_result.model,
         "provider": route_result.provider_id,
         "reason": route_result.reason,
@@ -962,7 +962,7 @@ async def _record_usage_background(
                 input_tokens=usage_info.get("prompt_tokens", 0),
                 output_tokens=usage_info.get("completion_tokens", 0),
                 user_id=current_user.get("user_id", "unknown"),
-                task_type=route_result.task_type.value,
+                task_type=route_result.task_type,
                 duration_ms=duration_ms
             )
     except Exception as e:

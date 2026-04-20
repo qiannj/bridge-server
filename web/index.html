@@ -338,52 +338,91 @@
 
       <!-- ── ROUTING ── -->
       <div x-show="page === 'routing'" x-cloak>
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <!-- Strategy card -->
-          <div class="bg-white dark:bg-slate-800 rounded-xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm">
-            <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-4">路由策略</h3>
-            <select
-              x-model="routingStrategy"
-              class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-            >
-              <option value="fallback">fallback — 故障转移</option>
-              <option value="round_robin">round_robin — 轮询</option>
-              <option value="cost_optimized">cost_optimized — 成本优化</option>
-              <option value="lowest_latency">lowest_latency — 最低延迟</option>
-            </select>
-            <button
-              @click="saveRouting()"
-              :disabled="loading"
-              class="mt-4 w-full bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-semibold py-2 rounded-lg transition-colors"
-            >保存策略</button>
+
+        <!-- Strategy row -->
+        <div class="bg-white dark:bg-slate-800 rounded-xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm mb-4 flex items-center gap-4">
+          <span class="text-sm font-semibold text-slate-700 dark:text-slate-300 flex-shrink-0">路由策略</span>
+          <select x-model="routingStrategy" class="flex-1 max-w-xs px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500">
+            <option value="fallback">fallback — 故障转移</option>
+            <option value="round_robin">round_robin — 轮询</option>
+            <option value="cost_optimized">cost_optimized — 成本优化</option>
+            <option value="lowest_latency">lowest_latency — 最低延迟</option>
+          </select>
+          <button @click="saveRouting()" :disabled="loading" class="px-4 py-1.5 bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors">保存策略</button>
+        </div>
+
+        <!-- Scenarios -->
+        <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+          <div class="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-700">
+            <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300">场景路由规则</h3>
+            <div class="flex items-center gap-2">
+              <button @click="saveRouting()" :disabled="loading" class="px-3 py-1.5 bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-xs font-semibold rounded-lg transition-colors">💾 保存全部</button>
+              <button @click="addScenario()" class="px-3 py-1.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-lg transition-colors">+ 新增场景</button>
+            </div>
           </div>
 
-          <!-- Scenarios card -->
-          <div class="bg-white dark:bg-slate-800 rounded-xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm">
-            <div class="flex items-center justify-between mb-4">
-              <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300">场景路由</h3>
-              <button @click="addScenario()" class="text-xs text-brand-600 hover:text-brand-700 font-medium">+ 添加</button>
-            </div>
-            <div class="space-y-2">
-              <template x-for="(val, key) in routingScenarios" :key="key">
-                <div class="flex items-center gap-2">
-                  <span class="text-xs bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 rounded-lg flex-shrink-0 w-28 truncate" x-text="key"></span>
-                  <input
-                    :value="val"
-                    @change="routingScenarios[key] = $event.target.value"
-                    class="flex-1 px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 focus:ring-1 focus:ring-brand-500"
-                    placeholder="model name"
-                  />
-                  <button @click="deleteScenario(key)" class="text-red-400 hover:text-red-600 flex-shrink-0 text-sm px-1">✕</button>
+          <div x-show="Object.keys(routingScenarios).length === 0" class="p-8 text-center text-sm text-slate-400 italic">暂无场景路由配置</div>
+
+          <div class="divide-y divide-slate-100 dark:divide-slate-700">
+            <template x-for="(sc, key) in routingScenarios" :key="key">
+              <div class="px-5 py-3">
+                <!-- Scenario header row -->
+                <div class="flex items-center gap-3">
+                  <!-- Enabled toggle -->
+                  <button
+                    @click="sc.enabled = !sc.enabled"
+                    :class="sc.enabled ? 'bg-brand-500' : 'bg-slate-300 dark:bg-slate-600'"
+                    class="relative inline-flex h-5 w-9 flex-shrink-0 rounded-full transition-colors duration-200 focus:outline-none"
+                  >
+                    <span :class="sc.enabled ? 'translate-x-4' : 'translate-x-0'" class="inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200"></span>
+                  </button>
+                  <!-- Scenario name badge -->
+                  <span class="text-xs font-bold bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 px-2.5 py-1 rounded-md w-24 text-center flex-shrink-0" x-text="key"></span>
+                  <!-- Model selector -->
+                  <select
+                    x-model="sc.model"
+                    class="flex-1 px-2.5 py-1 text-xs rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 focus:ring-1 focus:ring-brand-500"
+                  >
+                    <option value="">— 选择模型 —</option>
+                    <template x-for="m in allModels" :key="m">
+                      <option :value="m" x-text="m" :selected="m === sc.model"></option>
+                    </template>
+                  </select>
+                  <!-- Expand / collapse patterns -->
+                  <button
+                    @click="sc._expanded = !sc._expanded"
+                    :class="sc._expanded ? 'text-brand-600' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-200'"
+                    class="text-xs px-2 py-1 rounded font-medium flex items-center gap-1 transition-colors flex-shrink-0"
+                  >
+                    <span x-text="(sc.patterns || []).length + ' 条规则'"></span>
+                    <span x-text="sc._expanded ? '▲' : '▼'" class="text-xs"></span>
+                  </button>
+                  <!-- Delete scenario -->
+                  <button @click="deleteScenario(key)" class="text-red-400 hover:text-red-600 text-xs px-1 flex-shrink-0">✕</button>
                 </div>
-              </template>
-              <div x-show="Object.keys(routingScenarios).length === 0" class="text-sm text-slate-400 italic">暂无场景路由配置</div>
-            </div>
-            <button
-              @click="saveRouting()"
-              :disabled="loading"
-              class="mt-4 w-full bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-60 text-slate-700 dark:text-slate-300 text-sm font-semibold py-2 rounded-lg transition-colors"
-            >保存场景</button>
+
+                <!-- Patterns list (expanded) -->
+                <div x-show="sc._expanded" class="mt-3 ml-12 space-y-1.5">
+                  <template x-for="(pat, idx) in (sc.patterns || [])" :key="idx">
+                    <div class="flex items-center gap-2">
+                      <span class="text-xs text-slate-400 w-4 text-right flex-shrink-0" x-text="idx+1"></span>
+                      <input
+                        :value="pat"
+                        @input="sc.patterns[idx] = $event.target.value"
+                        class="flex-1 px-2.5 py-1 text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 focus:ring-1 focus:ring-brand-500"
+                        placeholder="正则表达式，如: 代码|编程|bug"
+                      />
+                      <button @click="sc.patterns.splice(idx, 1)" class="text-red-400 hover:text-red-500 text-xs flex-shrink-0 px-1">✕</button>
+                    </div>
+                  </template>
+                  <button
+                    @click="sc.patterns = sc.patterns || []; sc.patterns.push('')"
+                    class="mt-1 text-xs text-brand-600 hover:text-brand-700 font-medium"
+                  >+ 添加规则</button>
+                  <p class="text-xs text-slate-400 mt-1">每条规则为正则表达式（支持 <code class="bg-slate-100 dark:bg-slate-700 px-1 rounded">|</code> 多选），不区分大小写。匹配任意一条即命中该场景。</p>
+                </div>
+              </div>
+            </template>
           </div>
         </div>
       </div>
@@ -756,6 +795,7 @@ function app() {
     routing: null,
     routingStrategy: 'fallback',
     routingScenarios: {},
+    allModels: [],
     // ui state
     loading: false,
     toast: '',
@@ -824,7 +864,7 @@ function app() {
       this.page = p;
       if (p === 'dashboard') await Promise.all([this.loadStatus(), this.loadUsage()]);
       else if (p === 'providers') await Promise.all([this.loadConfig(), this.loadStatus()]);
-      else if (p === 'routing') await this.loadRouting();
+      else if (p === 'routing') await Promise.all([this.loadConfig(), this.loadRouting()]);
       else if (p === 'usage') { await this.loadUsage(); this.$nextTick(() => this.renderChart()); }
       else if (p === 'logs') await this.loadLogs();
       else if (p === 'system') await Promise.all([this.loadConfig(), this.loadUpdates()]);
@@ -858,6 +898,14 @@ function app() {
         if (res.ok) {
           this.config = await res.json();
           this.providers = this.config.providers || [];
+          // Build flat model list from providers
+          this.allModels = [];
+          for (const p of (this.config?.providers || [])) {
+            for (const m of (p.models || [])) {
+              const mid = typeof m === 'string' ? m : (m.id || m);
+              this.allModels.push(p.name + '/' + mid);
+            }
+          }
         }
       } catch (e) { console.warn('loadConfig:', e); }
     },
@@ -878,7 +926,12 @@ function app() {
         if (res.ok) {
           this.routing = await res.json();
           this.routingStrategy = this.routing.strategy || 'fallback';
-          this.routingScenarios = { ...(this.routing.scenarios || {}) };
+          // Enrich each scenario with _expanded UI state
+          const raw = this.routing.scenarios || {};
+          this.routingScenarios = {};
+          for (const [k, v] of Object.entries(raw)) {
+            this.routingScenarios[k] = { ...v, _expanded: false };
+          }
         }
       } catch (e) { console.warn('loadRouting:', e); }
     },
@@ -1003,10 +1056,16 @@ function app() {
     async saveRouting() {
       this.loading = true;
       try {
+        // Build scenarios payload (strip _expanded UI state)
+        const scenarios = {};
+        for (const [k, v] of Object.entries(this.routingScenarios)) {
+          const { _expanded, ...rest } = v;
+          scenarios[k] = rest;
+        }
         const res = await this.api('/api/admin/routing', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ strategy: this.routingStrategy, scenarios: this.routingScenarios }),
+          body: JSON.stringify({ strategy: this.routingStrategy, scenarios }),
         });
         if (res.ok) this.showToast('路由配置已保存');
         else {
@@ -1021,10 +1080,10 @@ function app() {
     },
 
     addScenario() {
-      const key = prompt('场景名称（如 coding、translation）：');
-      if (key && key.trim()) {
-        this.routingScenarios = { ...this.routingScenarios, [key.trim()]: '' };
-      }
+      const key = prompt('场景名称 (如: coding, chat, custom):');
+      if (!key || !key.trim()) return;
+      if (this.routingScenarios[key.trim()]) { this.showToast('场景已存在', 'error'); return; }
+      this.routingScenarios[key.trim()] = { enabled: true, model: '', patterns: [], _expanded: true };
     },
 
     deleteScenario(key) {
