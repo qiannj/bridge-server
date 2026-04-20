@@ -59,9 +59,8 @@ def generate_panel_token() -> str:
 
 async def require_panel_auth(
     x_panel_token: Optional[str] = Header(None),
-    token: Optional[str] = Query(None),
 ):
-    t = x_panel_token or token
+    t = x_panel_token
     stored = get_panel_token()
     if not t or not stored or not secrets.compare_digest(t, stored):
         raise HTTPException(status_code=401, detail="无效的 Panel Token")

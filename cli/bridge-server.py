@@ -508,9 +508,6 @@ def cmd_panel_token(reset: bool = False):
     print(f"  面板地址：{Colors.CYAN}http://localhost:{port}/ui{Colors.ENDC}")
     print(f"  Panel Token：{Colors.GREEN}{token}{Colors.ENDC}")
     print()
-    print(f"  直接访问（带 token）：")
-    print(f"  {Colors.CYAN}http://localhost:{port}/ui?token={token}{Colors.ENDC}")
-    print()
 
 def cmd_route_test(text: str):
     """测试路由"""

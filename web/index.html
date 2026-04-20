@@ -768,7 +768,7 @@ let _usageChart = null;
 function app() {
   return {
     // auth
-    token: localStorage.getItem('panel_token') || '',
+    token: sessionStorage.getItem('panel_token') || '',
     authed: false,
     loginError: '',
     // navigation
@@ -812,10 +812,10 @@ function app() {
       if (this.dark) document.documentElement.classList.add('dark');
       else document.documentElement.classList.remove('dark');
 
-      // Auto-verify saved token
       if (this.token) {
         await this.login(true);
       }
+
     },
 
     toggleDark() {
@@ -840,12 +840,16 @@ function app() {
         });
         if (res.ok) {
           this.authed = true;
-          localStorage.setItem('panel_token', this.token.trim());
+          this.token = this.token.trim();
+          sessionStorage.setItem('panel_token', this.token);
           await this.refreshAll();
         } else {
           const err = await res.json().catch(() => ({}));
           if (!silent) this.loginError = err.detail || 'Token 无效';
-          else { this.token = ''; localStorage.removeItem('panel_token'); }
+          else {
+            this.token = '';
+            sessionStorage.removeItem('panel_token');
+          }
         }
       } catch (e) {
         if (!silent) this.loginError = '无法连接服务器: ' + e.message;
@@ -857,7 +861,7 @@ function app() {
     logout() {
       this.authed = false;
       this.token = '';
-      localStorage.removeItem('panel_token');
+      sessionStorage.removeItem('panel_token');
     },
 
     async navigate(p) {
