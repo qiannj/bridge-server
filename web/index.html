@@ -299,6 +299,10 @@
                   </td>
                   <td class="px-4 py-3 text-right">
                     <button
+                      @click="startEdit(p)"
+                      class="text-xs text-brand-500 hover:text-brand-700 dark:hover:text-brand-300 font-medium transition-colors px-2 py-1 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 mr-1"
+                    >编辑</button>
+                    <button
                       @click="confirmDelete(p.name)"
                       class="text-xs text-red-500 hover:text-red-700 dark:hover:text-red-400 font-medium transition-colors px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/30"
                     >删除</button>
@@ -652,6 +656,43 @@
   </div>
 </div>
 
+<!-- ═══════════════════ EDIT PROVIDER MODAL ═══════════════════ -->
+<div x-show="showEditProvider" x-cloak @click.self="showEditProvider = false"
+  class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+  <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md border border-slate-200 dark:border-slate-700">
+    <div class="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700">
+      <h2 class="text-base font-semibold">编辑 Provider: <span class="text-brand-600" x-text="editTarget"></span></h2>
+      <button @click="showEditProvider = false" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xl leading-none">✕</button>
+    </div>
+    <form @submit.prevent="doEditProvider()" class="px-6 py-5 space-y-4">
+      <div>
+        <label class="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">API Key <span class="text-xs text-slate-400">（留空保持不变）</span></label>
+        <input x-model="editProvider.api_key" type="password" placeholder="sk-... （留空不修改）"
+          class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent" />
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">模型列表 <span class="text-xs text-slate-400">（每行一个）</span></label>
+        <textarea x-model="editProvider.models" rows="5"
+          class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent font-mono resize-none"></textarea>
+      </div>
+      <div class="flex gap-3 pt-1">
+        <button type="button" @click="showEditProvider = false"
+          class="flex-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 font-semibold py-2 rounded-lg text-sm transition-colors">
+          取消
+        </button>
+        <button type="submit" :disabled="loading"
+          class="flex-1 bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white font-semibold py-2 rounded-lg text-sm transition-colors flex items-center justify-center gap-2">
+          <svg x-show="loading" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+          </svg>
+          保存修改
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <!-- ═══════════════════ TOAST ═══════════════════ -->
 <div x-show="toast" x-cloak x-transition:enter="transition ease-out duration-200" x-transition:enter-start="translate-y-2 opacity-0" x-transition:enter-end="translate-y-0 opacity-100"
   x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
@@ -722,6 +763,9 @@ function app() {
     showAddProvider: false,
     newProvider: { name: '', base_url: '', api_key: '', models: '' },
     deleteTarget: '',
+    showEditProvider: false,
+    editTarget: '',
+    editProvider: { api_key: '', models: '' },
 
     async init() {
       // Apply dark mode class
@@ -895,6 +939,42 @@ function app() {
 
     confirmDelete(name) {
       this.deleteTarget = name;
+    },
+
+    startEdit(p) {
+      this.editTarget = p.name;
+      this.editProvider = {
+        api_key: '',
+        models: (p.models || []).map(m => m.id || m).join('\n'),
+      };
+      this.showEditProvider = true;
+    },
+
+    async doEditProvider() {
+      if (!this.editTarget) return;
+      const models = this.editProvider.models.split('\n').map(s => s.trim()).filter(Boolean);
+      this.loading = true;
+      try {
+        const body = { models };
+        if (this.editProvider.api_key) body.api_key = this.editProvider.api_key;
+        const res = await this.api('/api/admin/providers/' + encodeURIComponent(this.editTarget), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (res.ok) {
+          this.showEditProvider = false;
+          await this.loadConfig();
+          this.showToast('Provider 已更新！');
+        } else {
+          const err = await res.json().catch(() => ({}));
+          this.showToast(err.detail || '更新失败', 'error');
+        }
+      } catch (e) {
+        this.showToast('操作失败: ' + e.message, 'error');
+      } finally {
+        this.loading = false;
+      }
     },
 
     async doDeleteProvider() {

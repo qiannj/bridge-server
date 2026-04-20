@@ -167,13 +167,48 @@ async def delete_provider(name: str):
     return {"ok": True}
 
 
+class ProviderUpdateRequest(BaseModel):
+    api_key: Optional[str] = None
+    models: Optional[List[str]] = None
+
+
+@router.put("/providers/{name}", dependencies=_deps)
+async def update_provider(name: str, req: ProviderUpdateRequest):
+    config_file = _get_config_dir() / "config.yaml"
+    config = _load_yaml(config_file)
+    providers = config.get("providers", [])
+    found = False
+    for p in providers:
+        if p.get("name") == name:
+            found = True
+            if req.api_key:
+                p["api_key"] = req.api_key
+                env_var = p.get("api_key_env", name.upper().replace("-", "_") + "_API_KEY")
+                env_file = _get_config_dir() / ".env"
+                env_lines = env_file.read_text(encoding="utf-8").splitlines() if env_file.exists() else []
+                env_lines = [l for l in env_lines if not l.startswith(f"{env_var}=")]
+                env_lines.append(f"{env_var}={req.api_key}")
+                env_file.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
+            if req.models is not None:
+                p["models"] = [{"id": m, "name": m} for m in req.models if m.strip()]
+            break
+    if not found:
+        raise HTTPException(status_code=404, detail=f"Provider '{name}' 不存在")
+    config["providers"] = providers
+    _save_yaml(config_file, config)
+    return {"ok": True}
+
+
 @router.get("/routing", dependencies=_deps)
 async def get_routing():
     config = _load_yaml(_get_config_dir() / "config.yaml")
-    return {
-        "strategy": config.get("routing", {}).get("strategy", "fallback"),
-        "scenarios": config.get("routing", {}).get("scenarios", {}),
-    }
+    strategy = config.get("routing", {}).get("strategy", "fallback")
+    # scenarios 在 config.yaml 根层级，格式 {name: {enabled, model}} 或 {name: str}
+    raw = config.get("scenarios", {})
+    scenarios: Dict[str, str] = {}
+    for k, v in raw.items():
+        scenarios[k] = v.get("model", "") if isinstance(v, dict) else str(v)
+    return {"strategy": strategy, "scenarios": scenarios}
 
 
 class RoutingUpdateRequest(BaseModel):
@@ -185,12 +220,16 @@ class RoutingUpdateRequest(BaseModel):
 async def update_routing(req: RoutingUpdateRequest):
     config_file = _get_config_dir() / "config.yaml"
     config = _load_yaml(config_file)
-    if "routing" not in config:
-        config["routing"] = {}
     if req.strategy:
+        if "routing" not in config:
+            config["routing"] = {}
         config["routing"]["strategy"] = req.strategy
     if req.scenarios is not None:
-        config["routing"]["scenarios"] = req.scenarios
+        # 保存为与 setup wizard 一致的格式 {name: {enabled: true, model: str}}
+        config["scenarios"] = {
+            k: {"enabled": True, "model": v}
+            for k, v in req.scenarios.items() if v
+        }
     _save_yaml(config_file, config)
     return {"ok": True}
 
