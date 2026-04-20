@@ -446,8 +446,12 @@ class SetupWizard:
     def _test_provider_connection(self, base_url: str, api_key: str, model_id: str) -> bool:
         """测试 Provider 连接"""
         try:
-            # 构造测试请求
-            test_url = base_url.rstrip('/') + '/chat/completions'
+            # 若 base_url 已以 /chat/completions 结尾则直接使用，否则拼接
+            stripped = base_url.rstrip('/')
+            if stripped.endswith('/chat/completions'):
+                test_url = stripped
+            else:
+                test_url = stripped + '/chat/completions'
             headers = {
                 'Content-Type': 'application/json',
                 'Authorization': f'Bearer {api_key}'
@@ -463,7 +467,15 @@ class SetupWizard:
             print(f"  请求：POST {test_url}")
             print(f"  模型：{model_id}")
             
-            response = httpx.post(test_url, json=data, headers=headers, timeout=10)
+            # 先尝试正常 SSL 验证，失败后自动降级（企业代理场景）
+            try:
+                response = httpx.post(test_url, json=data, headers=headers, timeout=10)
+            except httpx.ConnectError as ssl_err:
+                if 'CERTIFICATE_VERIFY_FAILED' in str(ssl_err) or 'SSL' in str(ssl_err).upper():
+                    print(f"  {Colors.YELLOW}⚠ SSL 验证失败（企业代理），尝试跳过证书验证...{Colors.ENDC}")
+                    response = httpx.post(test_url, json=data, headers=headers, timeout=10, verify=False)
+                else:
+                    raise
             
             if response.status_code == 200:
                 print(f"  {Colors.GREEN}✓ 连接成功 (HTTP {response.status_code}){Colors.ENDC}")
