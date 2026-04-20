@@ -878,7 +878,9 @@ async def _stream_chat_completion(
             # 将路由信息注入到第一个有效 chunk（让客户端知道路由决策）
             if first_chunk and isinstance(payload, dict):
                 first_chunk = False
-                payload.setdefault("usage", {})
+                # usage 可能是 null（NVIDIA 流式第一帧），需显式覆盖
+                if not isinstance(payload.get("usage"), dict):
+                    payload["usage"] = {}
                 payload["usage"]["routing"] = routing_info
 
             yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
