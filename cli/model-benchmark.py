@@ -88,7 +88,7 @@ BENCHMARK_QUESTIONS: Dict[str, List[Dict]] = {
     "writing": [
         {
             "id": "write_1",
-            "prompt": "以"第一场雪"为题，写一段200字左右的散文，要求意境优美，有具体的场景描写。",
+            "prompt": "以「第一场雪」为题，写一段200字左右的散文，要求意境优美，有具体的场景描写。",
             "check": lambda r: len(r) >= 100,
             "check_desc": "回复长度 ≥ 100 字",
         },
@@ -100,7 +100,7 @@ BENCHMARK_QUESTIONS: Dict[str, List[Dict]] = {
         },
         {
             "id": "write_3",
-            "prompt": "为一款主打"极简主义"风格的蓝牙耳机写一段产品介绍文案（80字以内），突出设计感和音质。",
+            "prompt": "为一款主打「极简主义」风格的蓝牙耳机写一段产品介绍文案（80字以内），突出设计感和音质。",
             "check": lambda r: 20 <= len(r) <= 300,
             "check_desc": "长度适中（20-300字）",
         },
