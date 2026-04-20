@@ -49,6 +49,85 @@ class Colors:
     UNDERLINE = '\033[4m'
 
 
+def select_from_list(title: str, options: list, default_index: int = 0) -> str:
+    """
+    终端箭头键选择菜单。
+    返回选中的 option 字符串；若终端不支持 raw 模式则降级为数字输入。
+    """
+    import sys, os
+
+    def _arrow_select():
+        import tty, termios
+        idx = default_index
+
+        def render():
+            # 每次重新渲染：上移已打印行
+            lines = len(options) + 1
+            sys.stdout.write(f"\033[{lines}A\033[J")
+            print(f"  {Colors.CYAN}{title}{Colors.ENDC}")
+            for i, opt in enumerate(options):
+                if i == idx:
+                    print(f"  {Colors.GREEN}❯ {opt}{Colors.ENDC}")
+                else:
+                    print(f"    {opt}")
+            sys.stdout.flush()
+
+        # 首次打印
+        print(f"  {Colors.CYAN}{title}{Colors.ENDC}")
+        for i, opt in enumerate(options):
+            if i == idx:
+                print(f"  {Colors.GREEN}❯ {opt}{Colors.ENDC}")
+            else:
+                print(f"    {opt}")
+        sys.stdout.flush()
+
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            while True:
+                ch = sys.stdin.read(1)
+                if ch == '\r' or ch == '\n':
+                    break
+                elif ch == '\x03':  # Ctrl+C
+                    raise KeyboardInterrupt
+                elif ch == '\x1b':  # ESC sequence
+                    ch2 = sys.stdin.read(1)
+                    if ch2 == '[':
+                        ch3 = sys.stdin.read(1)
+                        if ch3 == 'A':  # Up
+                            idx = (idx - 1) % len(options)
+                        elif ch3 == 'B':  # Down
+                            idx = (idx + 1) % len(options)
+                render()
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        print()  # 换行
+        return options[idx]
+
+    def _numeric_select():
+        print(f"  {Colors.CYAN}{title}{Colors.ENDC}")
+        for i, opt in enumerate(options, 1):
+            marker = " (默认)" if i - 1 == default_index else ""
+            print(f"  {i}. {opt}{marker}")
+        while True:
+            raw = input(f"  请选择 [1-{len(options)}，回车={default_index+1}]: ").strip()
+            if not raw:
+                return options[default_index]
+            if raw.isdigit() and 1 <= int(raw) <= len(options):
+                return options[int(raw) - 1]
+            print(f"  {Colors.RED}请输入 1-{len(options)} 之间的数字{Colors.ENDC}")
+
+    # 仅在真实 TTY 下使用 raw 模式
+    try:
+        import tty, termios
+        if sys.stdin.isatty() and sys.stdout.isatty():
+            return _arrow_select()
+    except (ImportError, Exception):
+        pass
+    return _numeric_select()
+
+
 class SetupWizard:
     """配置向导 v2.1"""
     
@@ -335,13 +414,12 @@ class SetupWizard:
         if not base_url:
             return
         
-        # API Key 环境变量
-        api_key_env = input("环境变量名 (如 MY_LLM_API_KEY): ").strip()
-        if not api_key_env:
-            api_key_env = f"{name.upper().replace('-', '_')}_API_KEY"
+        # 自动派生环境变量名，无需用户输入
+        api_key_env = f"{name.upper().replace('-', '_').replace(' ', '_')}_API_KEY"
+        print(f"环境变量名（自动生成）：{Colors.CYAN}{api_key_env}{Colors.ENDC}")
         
         # API Key
-        api_key = input(f"请输入 API Key ({api_key_env}): ").strip()
+        api_key = input(f"请输入 API Key: ").strip()
         if not api_key:
             return
         
@@ -562,7 +640,7 @@ class SetupWizard:
                 f.write(f"{k}={v}\n")
     
     def _configure_scenarios(self):
-        """配置场景化模型 - 优化：从已配置模型中选择"""
+        """配置场景化模型 - 箭头键选择菜单"""
         print(f"\n{Colors.BOLD}🎯 步骤 2/4: 配置场景化模型{Colors.ENDC}")
         print(f"{'-'*60}\n")
         
@@ -571,7 +649,7 @@ class SetupWizard:
             print(f"\n{Colors.YELLOW}⚠️  已跳过{Colors.ENDC}")
             return
         
-        # 收集所有已配置的模型 ID
+        # 收集所有已配置的模型 ID（provider/model_id 格式）
         available_models = []
         for provider in self.config['providers']:
             provider_name = provider.get('name', 'unknown')
@@ -579,40 +657,32 @@ class SetupWizard:
             if isinstance(models, list):
                 for model in models:
                     model_id = model.get('id', '') if isinstance(model, dict) else str(model)
-                    full_id = f"{provider_name}/{model_id}"
-                    available_models.append(full_id)
+                    available_models.append(f"{provider_name}/{model_id}")
             elif isinstance(models, dict):
                 for model_id in models.keys():
-                    full_id = f"{provider_name}/{model_id}"
-                    available_models.append(full_id)
+                    available_models.append(f"{provider_name}/{model_id}")
         
         if not available_models:
             print(f"{Colors.RED}❌ 没有可用的模型，请先配置 Provider{Colors.ENDC}")
             return
         
-        scenarios = {
-            'coding': {'name': '💻 编程辅助', 'desc': '代码生成、调试'},
-            'writing': {'name': '✍️ 写作创作', 'desc': '文章、邮件'},
-            'search': {'name': '🔍 搜索分析', 'desc': '信息检索'},
-            'summary': {'name': '📝 摘要总结', 'desc': '长文摘要'},
-            'chat': {'name': '💬 日常对话', 'desc': '聊天问答'},
-            'translation': {'name': '🌐 翻译', 'desc': '多语言互译'}
-        }
+        scenarios = [
+            ('coding',      '💻 编程辅助',  '代码生成、调试'),
+            ('writing',     '✍️  写作创作',  '文章、邮件'),
+            ('search',      '🔍 搜索分析',  '信息检索'),
+            ('summary',     '📝 摘要总结',  '长文摘要'),
+            ('chat',        '💬 日常对话',  '聊天问答'),
+            ('translation', '🌐 翻译',      '多语言互译'),
+        ]
         
-        for key, scenario in scenarios.items():
-            print(f"\n{scenario['name']} ({scenario['desc']}):")
-            preview_models = ', '.join(available_models[:5])
-            suffix = '...' if len(available_models) > 5 else ''
-            print(f"  可用模型：{preview_models}{suffix}")
-            default_model = available_models[0]
-            while True:
-                model = input(f"  选择模型 (输入模型 ID，回车={default_model}): ").strip()
-                if not model:
-                    model = default_model
-                if model in available_models:
-                    break
-                print(f"  {Colors.RED}✗ 请输入已配置的模型 ID{Colors.ENDC}")
-            self.config['scenarios'][key] = {'enabled': True, 'model': model}
+        for key, name, desc in scenarios:
+            print(f"\n{Colors.BOLD}{name}  ({desc}){Colors.ENDC}")
+            # 当前已保存的值作为默认
+            current = self.config.get('scenarios', {}).get(key, {}).get('model', available_models[0])
+            default_idx = available_models.index(current) if current in available_models else 0
+            chosen = select_from_list(f"选择模型（↑↓ 移动，Enter 确认）", available_models, default_idx)
+            self.config['scenarios'][key] = {'enabled': True, 'model': chosen}
+            print(f"  {Colors.GREEN}✓ 已选择：{chosen}{Colors.ENDC}")
         
         print(f"\n{Colors.GREEN}✅ 场景化模型配置完成{Colors.ENDC}")
         print(f"   提示：场景配置只允许选择已配置的具体模型，避免路由配置自引用")
