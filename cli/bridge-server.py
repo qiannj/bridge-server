@@ -644,6 +644,16 @@ def cmd_auth_login(username: str, password: str):
     
     print()
 
+def cmd_benchmark():
+    """运行模型能力基准测试"""
+    import subprocess
+    benchmark_script = Path(__file__).parent / "model-benchmark.py"
+    if not benchmark_script.exists():
+        print_error("benchmark 模块未找到，请确认 cli/model-benchmark.py 存在")
+        sys.exit(1)
+    subprocess.run([sys.executable, str(benchmark_script)] + sys.argv[2:])
+
+
 def print_help():
     """显示帮助"""
     help_text = f"""
@@ -679,6 +689,7 @@ def print_help():
     backup          备份配置
     restore         恢复配置
     setup           运行配置向导
+    benchmark       模型能力基准测试
 
   其他:
     help            显示帮助
@@ -741,6 +752,8 @@ def main():
         cmd_restore(sys.argv[2])
     elif command == "setup":
         cmd_setup()
+    elif command == "benchmark":
+        cmd_benchmark()
     elif command == "route-test":
         text = " ".join(sys.argv[2:]) if len(sys.argv) > 2 else "你好"
         cmd_route_test(text)
