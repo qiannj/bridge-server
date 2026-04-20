@@ -7,6 +7,7 @@
 import asyncio
 import importlib.util
 import logging
+import os
 from typing import Dict, Any, Optional
 import aiohttp
 import aiosqlite
@@ -14,6 +15,11 @@ import httpx
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+def _ssl_verify_disabled() -> bool:
+    """当设置环境变量 BRIDGE_DISABLE_SSL_VERIFY=1 时跳过 SSL 验证（用于公司代理环境）。"""
+    return os.getenv("BRIDGE_DISABLE_SSL_VERIFY", "").strip() in ("1", "true", "yes")
 
 
 class ConnectionPoolManager:
@@ -283,6 +289,7 @@ class ConnectionPoolManager:
             http2=http2_enabled,
             follow_redirects=follow_redirects,
             event_hooks=event_hooks,
+            verify=not _ssl_verify_disabled(),
         )
         self.httpx_clients[provider_id] = client
         return client
