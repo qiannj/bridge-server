@@ -26,7 +26,8 @@ except ImportError:
 
 from fastapi import FastAPI, Request, Depends, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse, Response
+from fastapi.responses import StreamingResponse, JSONResponse, Response, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -309,6 +310,15 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
+# Mount admin API
+from .admin_api import router as admin_router
+app.include_router(admin_router)
+
+# Mount web UI static files
+_web_dir = Path(__file__).parent.parent.parent / "web"
+if _web_dir.exists():
+    app.mount("/ui", StaticFiles(directory=str(_web_dir), html=True), name="ui")
+
 
 async def require_auth(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
     """FastAPI dependency: reject requests without a valid auth token."""
@@ -410,13 +420,11 @@ async def shutdown_event():
 
 @app.get("/")
 async def root():
-    """根路径"""
-    stats = await perf_monitor.get_stats()
-    return {
-        "message": "Bridge Server v2.0 - 异步优化版",
-        "version": "2.0.0-async",
-        "performance": stats
-    }
+    """根路径 - 重定向到管理面板"""
+    _web = Path(__file__).parent.parent.parent / "web"
+    if _web.exists():
+        return RedirectResponse(url="/ui")
+    return {"message": "Bridge Server v2.0", "version": "2.0.0-async"}
 
 
 @app.get("/health")

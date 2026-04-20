@@ -1,0 +1,1042 @@
+<!DOCTYPE html>
+<html lang="zh-CN" x-data="app()" :class="{ dark: dark }" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bridge Server 管理面板</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: { 50:'#eef2ff',100:'#e0e7ff',200:'#c7d2fe',500:'#6366f1',600:'#4f46e5',700:'#4338ca',800:'#3730a3',900:'#312e81' }
+          }
+        }
+      }
+    }
+  </script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    .log-line-error   { color: #f87171; }
+    .log-line-warning { color: #fbbf24; }
+    .log-line-info    { color: #94a3b8; }
+    .log-line-debug   { color: #64748b; }
+    .scrollbar-thin::-webkit-scrollbar { width: 4px; }
+    .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+    .scrollbar-thin::-webkit-scrollbar-thumb { background: #6366f1; border-radius: 2px; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+  </style>
+</head>
+<body class="h-full bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 transition-colors duration-200">
+
+<!-- ═══════════════════ LOGIN PAGE ═══════════════════ -->
+<div x-show="!authed" x-cloak class="min-h-screen flex items-center justify-center px-4">
+  <div class="w-full max-w-sm">
+    <!-- Logo -->
+    <div class="text-center mb-8">
+      <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-brand-600 shadow-lg mb-4">
+        <span class="text-3xl">🌉</span>
+      </div>
+      <h1 class="text-2xl font-bold text-slate-900 dark:text-white">Bridge Server</h1>
+      <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">管理面板</p>
+    </div>
+
+    <!-- Card -->
+    <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-8 border border-slate-200 dark:border-slate-700">
+      <h2 class="text-lg font-semibold mb-6 text-slate-700 dark:text-slate-200">登录</h2>
+
+      <div x-show="loginError" class="mb-4 flex items-center gap-2 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-sm px-4 py-3 rounded-lg border border-red-200 dark:border-red-800">
+        <span>⚠️</span> <span x-text="loginError"></span>
+      </div>
+
+      <form @submit.prevent="login()">
+        <label class="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-2">Panel Token</label>
+        <div class="relative">
+          <input
+            x-model="token"
+            type="password"
+            placeholder="pt-xxxxxxxxxxxxxxxx"
+            class="w-full px-4 py-2.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent text-sm"
+            autocomplete="current-password"
+            @keyup.enter="login()"
+          />
+        </div>
+        <p class="mt-2 text-xs text-slate-400 dark:text-slate-500">运行 <code class="bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded text-xs">bridge-server panel-token</code> 获取</p>
+
+        <button
+          type="submit"
+          :disabled="loading"
+          class="mt-6 w-full flex items-center justify-center gap-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white font-semibold py-2.5 px-4 rounded-lg transition-colors duration-150 text-sm"
+        >
+          <svg x-show="loading" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+          </svg>
+          <span x-text="loading ? '验证中...' : '登录'"></span>
+        </button>
+      </form>
+    </div>
+
+    <!-- Dark mode toggle on login page -->
+    <div class="text-center mt-4">
+      <button @click="toggleDark()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-sm transition-colors">
+        <span x-text="dark ? '☀️ 浅色模式' : '🌙 深色模式'"></span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ MAIN APP ═══════════════════ -->
+<div x-show="authed" x-cloak class="flex h-screen overflow-hidden">
+
+  <!-- ── Sidebar ── -->
+  <aside class="w-56 flex-shrink-0 bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 flex flex-col">
+    <!-- Brand -->
+    <div class="flex items-center gap-3 px-5 py-4 border-b border-slate-200 dark:border-slate-700">
+      <div class="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center flex-shrink-0">
+        <span class="text-base">🌉</span>
+      </div>
+      <div class="min-w-0">
+        <p class="text-sm font-bold text-slate-900 dark:text-white leading-tight">Bridge Server</p>
+        <p class="text-xs text-slate-400 truncate">管理面板</p>
+      </div>
+    </div>
+
+    <!-- Nav -->
+    <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto scrollbar-thin">
+      <template x-for="item in navItems" :key="item.id">
+        <button
+          @click="navigate(item.id)"
+          :class="page === item.id
+            ? 'bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 font-semibold'
+            : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-slate-200'"
+          class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-100"
+        >
+          <span x-text="item.icon" class="text-base flex-shrink-0"></span>
+          <span x-text="item.label"></span>
+        </button>
+      </template>
+    </nav>
+
+    <!-- Bottom: logout + dark toggle -->
+    <div class="px-3 py-4 border-t border-slate-200 dark:border-slate-700 space-y-1">
+      <button @click="toggleDark()" class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
+        <span x-text="dark ? '☀️' : '🌙'" class="text-base flex-shrink-0"></span>
+        <span x-text="dark ? '浅色模式' : '深色模式'"></span>
+      </button>
+      <button @click="logout()" class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-600 dark:text-slate-400 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-600 dark:hover:text-red-400 transition-colors">
+        <span class="text-base flex-shrink-0">🚪</span>
+        <span>退出登录</span>
+      </button>
+    </div>
+  </aside>
+
+  <!-- ── Content ── -->
+  <div class="flex-1 flex flex-col overflow-hidden">
+    <!-- Top bar -->
+    <header class="flex items-center justify-between px-6 py-3 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">
+      <h1 class="text-base font-semibold text-slate-900 dark:text-white" x-text="navItems.find(n=>n.id===page)?.label || ''"></h1>
+      <div class="flex items-center gap-3">
+        <!-- Status dot -->
+        <div class="flex items-center gap-1.5 text-xs text-slate-500">
+          <div :class="status?.status === 'healthy' ? 'bg-emerald-400' : 'bg-yellow-400'" class="w-2 h-2 rounded-full animate-pulse"></div>
+          <span x-text="status?.status === 'healthy' ? '运行中' : (status?.status || '检查中...')"></span>
+        </div>
+        <button @click="refreshAll()" :disabled="loading" class="text-slate-400 hover:text-brand-600 dark:hover:text-brand-400 transition-colors" title="刷新">
+          <svg :class="loading ? 'animate-spin' : ''" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Page content -->
+    <main class="flex-1 overflow-y-auto p-6 scrollbar-thin">
+
+      <!-- ── DASHBOARD ── -->
+      <div x-show="page === 'dashboard'" x-cloak>
+        <!-- Stats cards -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <div class="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700 shadow-sm">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">服务状态</span>
+              <span class="text-lg">💚</span>
+            </div>
+            <div :class="status?.status === 'healthy' ? 'text-emerald-500' : 'text-yellow-500'" class="text-2xl font-bold" x-text="status?.status || '...'"></div>
+          </div>
+          <div class="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700 shadow-sm">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">今日请求</span>
+              <span class="text-lg">📊</span>
+            </div>
+            <div class="text-2xl font-bold text-brand-600" x-text="usage?.summary?.total_requests?.toLocaleString() || '0'"></div>
+          </div>
+          <div class="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700 shadow-sm">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">今日 Tokens</span>
+              <span class="text-lg">🔤</span>
+            </div>
+            <div class="text-2xl font-bold text-purple-600" x-text="(usage?.summary?.total_tokens || 0).toLocaleString()"></div>
+          </div>
+          <div class="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700 shadow-sm">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">活跃 Providers</span>
+              <span class="text-lg">🔌</span>
+            </div>
+            <div class="text-2xl font-bold text-indigo-600" x-text="Object.keys(status?.providers || {}).length"></div>
+          </div>
+        </div>
+
+        <!-- Provider health + Version info row -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+          <!-- Provider Health -->
+          <div class="bg-white dark:bg-slate-800 rounded-xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm">
+            <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-4">Provider 健康状态</h3>
+            <div x-show="Object.keys(status?.providers || {}).length === 0" class="text-sm text-slate-400 italic">暂无 Provider 数据</div>
+            <div class="space-y-2">
+              <template x-for="[name, st] in Object.entries(status?.providers || {})" :key="name">
+                <div class="flex items-center justify-between py-1">
+                  <span class="text-sm font-medium text-slate-700 dark:text-slate-300" x-text="name"></span>
+                  <span
+                    :class="st === 'healthy' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400' : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-400'"
+                    class="text-xs font-semibold px-2.5 py-0.5 rounded-full"
+                    x-text="st"
+                  ></span>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- Performance -->
+          <div class="bg-white dark:bg-slate-800 rounded-xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm">
+            <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-4">性能统计</h3>
+            <div class="space-y-3">
+              <div class="flex justify-between text-sm">
+                <span class="text-slate-500">版本</span>
+                <span class="font-medium" x-text="status?.version || '2.0.0'"></span>
+              </div>
+              <div class="flex justify-between text-sm">
+                <span class="text-slate-500">平均延迟</span>
+                <span class="font-medium" x-text="status?.performance?.avg_latency_ms ? status.performance.avg_latency_ms.toFixed(1) + ' ms' : 'N/A'"></span>
+              </div>
+              <div class="flex justify-between text-sm">
+                <span class="text-slate-500">总请求数</span>
+                <span class="font-medium" x-text="status?.performance?.total_requests?.toLocaleString() || '0'"></span>
+              </div>
+              <div class="flex justify-between text-sm">
+                <span class="text-slate-500">缓存命中率</span>
+                <span class="font-medium" x-text="status?.cache?.hit_rate ? (status.cache.hit_rate * 100).toFixed(1) + '%' : 'N/A'"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Recent requests mini-table -->
+        <div class="bg-white dark:bg-slate-800 rounded-xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm">
+          <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-4">最近请求</h3>
+          <div x-show="!usage?.records?.length" class="text-sm text-slate-400 italic">暂无记录</div>
+          <table x-show="usage?.records?.length" class="w-full text-sm">
+            <thead>
+              <tr class="text-xs text-slate-400 uppercase border-b border-slate-100 dark:border-slate-700">
+                <th class="pb-2 text-left font-medium">时间</th>
+                <th class="pb-2 text-left font-medium">模型</th>
+                <th class="pb-2 text-right font-medium">Tokens</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="r in (usage?.records || []).slice(0, 5)" :key="r.id || r.timestamp">
+                <tr class="border-b border-slate-50 dark:border-slate-700/50">
+                  <td class="py-2 text-slate-500" x-text="formatTs(r.timestamp)"></td>
+                  <td class="py-2 font-medium" x-text="r.model || 'unknown'"></td>
+                  <td class="py-2 text-right text-slate-600 dark:text-slate-300" x-text="(r.total_tokens || 0).toLocaleString()"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── PROVIDERS ── -->
+      <div x-show="page === 'providers'" x-cloak>
+        <div class="flex items-center justify-between mb-4">
+          <p class="text-sm text-slate-500">管理 AI Provider 配置</p>
+          <button @click="showAddProvider = true" class="flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+            <span>+</span> 添加 Provider
+          </button>
+        </div>
+
+        <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50 dark:bg-slate-700/50">
+              <tr class="text-xs text-slate-500 uppercase">
+                <th class="px-4 py-3 text-left font-medium">名称</th>
+                <th class="px-4 py-3 text-left font-medium hidden md:table-cell">Base URL</th>
+                <th class="px-4 py-3 text-left font-medium">模型数</th>
+                <th class="px-4 py-3 text-left font-medium">状态</th>
+                <th class="px-4 py-3 text-right font-medium">操作</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
+              <template x-for="p in providers" :key="p.name">
+                <tr class="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+                  <td class="px-4 py-3 font-semibold text-slate-900 dark:text-slate-100" x-text="p.name"></td>
+                  <td class="px-4 py-3 text-slate-500 text-xs hidden md:table-cell max-w-xs truncate" x-text="p.base_url || '—'"></td>
+                  <td class="px-4 py-3">
+                    <span class="bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 text-xs font-semibold px-2 py-0.5 rounded-full" x-text="(p.models || []).length"></span>
+                  </td>
+                  <td class="px-4 py-3">
+                    <span
+                      :class="(status?.providers || {})[p.name] === 'healthy'
+                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400'
+                        : 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400'"
+                      class="text-xs font-semibold px-2.5 py-0.5 rounded-full"
+                      x-text="(status?.providers || {})[p.name] || 'unknown'"
+                    ></span>
+                  </td>
+                  <td class="px-4 py-3 text-right">
+                    <button
+                      @click="confirmDelete(p.name)"
+                      class="text-xs text-red-500 hover:text-red-700 dark:hover:text-red-400 font-medium transition-colors px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/30"
+                    >删除</button>
+                  </td>
+                </tr>
+              </template>
+              <tr x-show="providers.length === 0">
+                <td colspan="5" class="px-4 py-8 text-center text-slate-400 italic">暂无 Provider 配置</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Models detail accordion -->
+        <div class="mt-4 space-y-2">
+          <template x-for="p in providers" :key="'detail-'+p.name">
+            <details class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+              <summary class="px-5 py-3 cursor-pointer text-sm font-semibold select-none flex items-center gap-2">
+                <span x-text="p.name"></span>
+                <span class="text-xs text-slate-400 font-normal" x-text="'— ' + (p.models || []).length + ' 个模型'"></span>
+              </summary>
+              <div class="px-5 pb-4">
+                <div class="flex flex-wrap gap-2 mt-2">
+                  <template x-for="m in (p.models || [])" :key="m.id || m">
+                    <span class="bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs px-2.5 py-1 rounded-full" x-text="m.id || m"></span>
+                  </template>
+                </div>
+              </div>
+            </details>
+          </template>
+        </div>
+      </div>
+
+      <!-- ── ROUTING ── -->
+      <div x-show="page === 'routing'" x-cloak>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <!-- Strategy card -->
+          <div class="bg-white dark:bg-slate-800 rounded-xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm">
+            <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-4">路由策略</h3>
+            <select
+              x-model="routingStrategy"
+              class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+            >
+              <option value="fallback">fallback — 故障转移</option>
+              <option value="round_robin">round_robin — 轮询</option>
+              <option value="cost_optimized">cost_optimized — 成本优化</option>
+              <option value="lowest_latency">lowest_latency — 最低延迟</option>
+            </select>
+            <button
+              @click="saveRouting()"
+              :disabled="loading"
+              class="mt-4 w-full bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-semibold py-2 rounded-lg transition-colors"
+            >保存策略</button>
+          </div>
+
+          <!-- Scenarios card -->
+          <div class="bg-white dark:bg-slate-800 rounded-xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300">场景路由</h3>
+              <button @click="addScenario()" class="text-xs text-brand-600 hover:text-brand-700 font-medium">+ 添加</button>
+            </div>
+            <div class="space-y-2">
+              <template x-for="(val, key) in routingScenarios" :key="key">
+                <div class="flex items-center gap-2">
+                  <span class="text-xs bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 rounded-lg flex-shrink-0 w-28 truncate" x-text="key"></span>
+                  <input
+                    :value="val"
+                    @change="routingScenarios[key] = $event.target.value"
+                    class="flex-1 px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 focus:ring-1 focus:ring-brand-500"
+                    placeholder="model name"
+                  />
+                  <button @click="deleteScenario(key)" class="text-red-400 hover:text-red-600 flex-shrink-0 text-sm px-1">✕</button>
+                </div>
+              </template>
+              <div x-show="Object.keys(routingScenarios).length === 0" class="text-sm text-slate-400 italic">暂无场景路由配置</div>
+            </div>
+            <button
+              @click="saveRouting()"
+              :disabled="loading"
+              class="mt-4 w-full bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-60 text-slate-700 dark:text-slate-300 text-sm font-semibold py-2 rounded-lg transition-colors"
+            >保存场景</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── USAGE ── -->
+      <div x-show="page === 'usage'" x-cloak>
+        <!-- Period selector -->
+        <div class="flex gap-2 mb-4">
+          <template x-for="p in [{v:'today',l:'今天'},{v:'week',l:'本周'},{v:'month',l:'本月'}]" :key="p.v">
+            <button
+              @click="usagePeriod = p.v; loadUsage()"
+              :class="usagePeriod === p.v ? 'bg-brand-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700'"
+              class="px-4 py-1.5 text-sm font-medium rounded-lg transition-colors"
+              x-text="p.l"
+            ></button>
+          </template>
+        </div>
+
+        <!-- Summary cards -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <div class="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700 shadow-sm">
+            <p class="text-xs text-slate-500 uppercase tracking-wide mb-1">总请求</p>
+            <p class="text-2xl font-bold text-brand-600" x-text="(usage?.summary?.total_requests || 0).toLocaleString()"></p>
+          </div>
+          <div class="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700 shadow-sm">
+            <p class="text-xs text-slate-500 uppercase tracking-wide mb-1">输入 Tokens</p>
+            <p class="text-2xl font-bold text-indigo-600" x-text="(usage?.summary?.prompt_tokens || 0).toLocaleString()"></p>
+          </div>
+          <div class="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700 shadow-sm">
+            <p class="text-xs text-slate-500 uppercase tracking-wide mb-1">输出 Tokens</p>
+            <p class="text-2xl font-bold text-purple-600" x-text="(usage?.summary?.completion_tokens || 0).toLocaleString()"></p>
+          </div>
+          <div class="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700 shadow-sm">
+            <p class="text-xs text-slate-500 uppercase tracking-wide mb-1">最常用模型</p>
+            <p class="text-sm font-bold text-slate-700 dark:text-slate-200 truncate" x-text="topModel()"></p>
+          </div>
+        </div>
+
+        <!-- Chart + by-model -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+          <div class="lg:col-span-2 bg-white dark:bg-slate-800 rounded-xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm">
+            <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-4">每日 Token 用量</h3>
+            <div class="relative h-52">
+              <canvas id="usageChart"></canvas>
+            </div>
+          </div>
+          <div class="bg-white dark:bg-slate-800 rounded-xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm">
+            <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-4">模型分布</h3>
+            <div class="space-y-3">
+              <template x-for="[model, info] in Object.entries(usage?.by_model || {})" :key="model">
+                <div>
+                  <div class="flex justify-between text-xs mb-1">
+                    <span class="text-slate-600 dark:text-slate-300 font-medium truncate max-w-28" x-text="model"></span>
+                    <span class="text-slate-400 flex-shrink-0" x-text="info.requests + ' 次'"></span>
+                  </div>
+                  <div class="h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                    <div
+                      class="h-full bg-brand-500 rounded-full transition-all duration-500"
+                      :style="'width:' + modelPercent(model) + '%'"
+                    ></div>
+                  </div>
+                </div>
+              </template>
+              <div x-show="Object.keys(usage?.by_model || {}).length === 0" class="text-sm text-slate-400 italic">暂无数据</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Recent requests table -->
+        <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+          <div class="px-5 py-3 border-b border-slate-100 dark:border-slate-700">
+            <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300">最近请求记录</h3>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-slate-50 dark:bg-slate-700/50">
+                <tr class="text-xs text-slate-400 uppercase">
+                  <th class="px-4 py-2.5 text-left font-medium">时间</th>
+                  <th class="px-4 py-2.5 text-left font-medium">模型</th>
+                  <th class="px-4 py-2.5 text-right font-medium">输入</th>
+                  <th class="px-4 py-2.5 text-right font-medium">输出</th>
+                  <th class="px-4 py-2.5 text-right font-medium">合计</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-50 dark:divide-slate-700">
+                <template x-for="r in (usage?.records || [])" :key="r.id || r.timestamp">
+                  <tr class="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+                    <td class="px-4 py-2.5 text-slate-500 text-xs" x-text="formatTs(r.timestamp)"></td>
+                    <td class="px-4 py-2.5 font-medium text-xs" x-text="r.model || '—'"></td>
+                    <td class="px-4 py-2.5 text-right text-slate-500 text-xs" x-text="(r.prompt_tokens || 0).toLocaleString()"></td>
+                    <td class="px-4 py-2.5 text-right text-slate-500 text-xs" x-text="(r.completion_tokens || 0).toLocaleString()"></td>
+                    <td class="px-4 py-2.5 text-right font-semibold text-xs" x-text="(r.total_tokens || 0).toLocaleString()"></td>
+                  </tr>
+                </template>
+                <tr x-show="!usage?.records?.length">
+                  <td colspan="5" class="px-4 py-6 text-center text-slate-400 italic">暂无记录</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── LOGS ── -->
+      <div x-show="page === 'logs'" x-cloak>
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-2">
+            <label class="text-sm text-slate-500">显示</label>
+            <select x-model="logLines" @change="loadLogs()" class="px-2 py-1 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700">
+              <option value="50">50 行</option>
+              <option value="100">100 行</option>
+              <option value="200">200 行</option>
+              <option value="500">500 行</option>
+            </select>
+          </div>
+          <button @click="loadLogs()" class="flex items-center gap-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 text-sm font-medium px-3 py-1.5 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+            刷新
+          </button>
+        </div>
+
+        <div class="bg-slate-950 rounded-xl border border-slate-700 p-4 h-[calc(100vh-220px)] overflow-y-auto scrollbar-thin font-mono text-xs" id="logContainer">
+          <template x-for="(line, i) in logs" :key="i">
+            <div
+              :class="logLineClass(line)"
+              class="py-0.5 hover:bg-white/5 px-1 rounded leading-relaxed whitespace-pre-wrap break-all"
+              x-text="line"
+            ></div>
+          </template>
+          <div x-show="logs.length === 0" class="text-slate-500 italic">暂无日志</div>
+        </div>
+      </div>
+
+      <!-- ── SYSTEM / UPDATES ── -->
+      <div x-show="page === 'system'" x-cloak>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <!-- Version info -->
+          <div class="bg-white dark:bg-slate-800 rounded-xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm">
+            <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-4">版本信息</h3>
+
+            <div class="space-y-3 mb-4">
+              <div class="flex justify-between items-center">
+                <span class="text-sm text-slate-500">当前版本</span>
+                <span class="font-mono text-sm font-bold text-brand-600" x-text="updates?.current || '2.0.0'"></span>
+              </div>
+              <div class="flex justify-between items-center">
+                <span class="text-sm text-slate-500">最新版本</span>
+                <span class="font-mono text-sm font-bold"
+                  :class="updates?.has_update ? 'text-amber-500' : 'text-emerald-500'"
+                  x-text="updates?.latest || (updates?.error ? '获取失败' : '检查中...')"
+                ></span>
+              </div>
+              <div x-show="updates?.published_at" class="flex justify-between items-center">
+                <span class="text-sm text-slate-500">发布时间</span>
+                <span class="text-sm text-slate-600 dark:text-slate-300" x-text="updates?.published_at?.slice(0,10) || ''"></span>
+              </div>
+            </div>
+
+            <!-- Update banner -->
+            <div x-show="updates?.has_update" class="bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded-lg p-3 mb-4">
+              <p class="text-sm font-semibold text-amber-700 dark:text-amber-400 mb-1">🚀 有新版本可用！</p>
+              <p class="text-xs text-amber-600 dark:text-amber-500 line-clamp-3" x-text="updates?.release_notes || ''"></p>
+            </div>
+
+            <div class="flex gap-2">
+              <button @click="loadUpdates()" :disabled="loading" class="flex-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 text-sm font-semibold py-2 rounded-lg transition-colors">
+                🔍 检查更新
+              </button>
+              <a
+                :href="updates?.release_url || 'https://github.com/qiannj/bridge-server/releases'"
+                target="_blank"
+                class="flex-1 text-center bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold py-2 rounded-lg transition-colors"
+                x-text="updates?.has_update ? '查看更新' : 'GitHub Releases'"
+              ></a>
+            </div>
+          </div>
+
+          <!-- Server config -->
+          <div class="bg-white dark:bg-slate-800 rounded-xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm">
+            <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-4">服务器配置</h3>
+            <div class="space-y-3">
+              <div class="flex justify-between text-sm">
+                <span class="text-slate-500">监听地址</span>
+                <span class="font-mono text-slate-700 dark:text-slate-300" x-text="(config?.server?.host || '0.0.0.0') + ':' + (config?.server?.port || 19377)"></span>
+              </div>
+              <div class="flex justify-between text-sm">
+                <span class="text-slate-500">Provider 数</span>
+                <span class="font-semibold" x-text="(config?.providers || []).length"></span>
+              </div>
+              <div class="flex justify-between text-sm">
+                <span class="text-slate-500">路由策略</span>
+                <span class="font-semibold" x-text="config?.routing?.strategy || 'fallback'"></span>
+              </div>
+              <div class="flex justify-between text-sm">
+                <span class="text-slate-500">认证状态</span>
+                <span x-text="config?.auth ? '已启用' : '未启用'" :class="config?.auth ? 'text-emerald-500' : 'text-slate-400'" class="font-semibold"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- GitHub link card -->
+        <div class="mt-4 bg-gradient-to-r from-slate-800 to-slate-700 dark:from-slate-700 dark:to-slate-600 rounded-xl p-5 border border-slate-600">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="text-white font-semibold mb-1">Bridge Server on GitHub</h3>
+              <p class="text-slate-300 text-sm">开源 AI Gateway，支持多 Provider 路由与管理</p>
+            </div>
+            <a href="https://github.com/qiannj/bridge-server" target="_blank"
+              class="flex items-center gap-2 bg-white text-slate-800 font-semibold text-sm px-4 py-2 rounded-lg hover:bg-slate-100 transition-colors flex-shrink-0 ml-4">
+              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+              </svg>
+              View on GitHub
+            </a>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<!-- ═══════════════════ ADD PROVIDER MODAL ═══════════════════ -->
+<div x-show="showAddProvider" x-cloak @click.self="showAddProvider = false"
+  class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+  <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md border border-slate-200 dark:border-slate-700">
+    <div class="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700">
+      <h2 class="text-base font-semibold">添加 Provider</h2>
+      <button @click="showAddProvider = false" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xl leading-none">✕</button>
+    </div>
+    <form @submit.prevent="doAddProvider()" class="px-6 py-5 space-y-4">
+      <div>
+        <label class="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">Provider 名称 <span class="text-red-400">*</span></label>
+        <input x-model="newProvider.name" type="text" placeholder="my-provider"
+          class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent" required />
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">Base URL <span class="text-red-400">*</span></label>
+        <input x-model="newProvider.base_url" type="url" placeholder="https://api.example.com/v1"
+          class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent" required />
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">API Key <span class="text-red-400">*</span></label>
+        <input x-model="newProvider.api_key" type="password" placeholder="sk-..."
+          class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent" required />
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">模型列表 <span class="text-xs text-slate-400">（每行一个）</span></label>
+        <textarea x-model="newProvider.models" rows="4" placeholder="gpt-4o&#10;gpt-4o-mini&#10;gpt-3.5-turbo"
+          class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent font-mono resize-none"></textarea>
+      </div>
+      <div class="flex gap-3 pt-1">
+        <button type="button" @click="showAddProvider = false"
+          class="flex-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 font-semibold py-2 rounded-lg text-sm transition-colors">
+          取消
+        </button>
+        <button type="submit" :disabled="loading"
+          class="flex-1 bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white font-semibold py-2 rounded-lg text-sm transition-colors flex items-center justify-center gap-2">
+          <svg x-show="loading" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+          </svg>
+          确认添加
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ═══════════════════ TOAST ═══════════════════ -->
+<div x-show="toast" x-cloak x-transition:enter="transition ease-out duration-200" x-transition:enter-start="translate-y-2 opacity-0" x-transition:enter-end="translate-y-0 opacity-100"
+  x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
+  class="fixed bottom-6 right-6 z-50 max-w-sm">
+  <div :class="toastType === 'success' ? 'bg-emerald-600' : 'bg-red-600'"
+    class="text-white px-4 py-3 rounded-xl shadow-lg text-sm font-medium flex items-center gap-2">
+    <span x-text="toastType === 'success' ? '✓' : '✕'" class="font-bold"></span>
+    <span x-text="toast"></span>
+  </div>
+</div>
+
+<!-- ═══════════════════ CONFIRM DELETE DIALOG ═══════════════════ -->
+<div x-show="deleteTarget" x-cloak @click.self="deleteTarget = ''"
+  class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+  <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm p-6 border border-slate-200 dark:border-slate-700">
+    <div class="flex items-center gap-3 mb-4">
+      <div class="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/40 flex items-center justify-center text-red-600 flex-shrink-0">⚠️</div>
+      <div>
+        <h2 class="font-semibold text-slate-900 dark:text-white">确认删除</h2>
+        <p class="text-sm text-slate-500 mt-0.5">删除 Provider "<span class="font-semibold" x-text="deleteTarget"></span>"？此操作不可撤销。</p>
+      </div>
+    </div>
+    <div class="flex gap-3">
+      <button @click="deleteTarget = ''" class="flex-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 font-semibold py-2 rounded-lg text-sm transition-colors">取消</button>
+      <button @click="doDeleteProvider()" :disabled="loading" class="flex-1 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white font-semibold py-2 rounded-lg text-sm transition-colors">确认删除</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ ALPINE.JS APP ═══════════════════ -->
+<script>
+let _usageChart = null;
+
+function app() {
+  return {
+    // auth
+    token: localStorage.getItem('panel_token') || '',
+    authed: false,
+    loginError: '',
+    // navigation
+    page: 'dashboard',
+    navItems: [
+      { id: 'dashboard', label: '仪表盘', icon: '📊' },
+      { id: 'providers', label: 'Providers', icon: '🔌' },
+      { id: 'routing', label: '路由配置', icon: '🔀' },
+      { id: 'usage', label: '用量统计', icon: '📈' },
+      { id: 'logs', label: '日志', icon: '📋' },
+      { id: 'system', label: '系统 / 更新', icon: '⚙️' },
+    ],
+    // dark mode
+    dark: localStorage.getItem('dark') === 'true',
+    // data
+    status: null,
+    config: null,
+    usage: null,
+    usagePeriod: 'today',
+    updates: null,
+    logs: [],
+    logLines: '100',
+    providers: [],
+    routing: null,
+    routingStrategy: 'fallback',
+    routingScenarios: {},
+    // ui state
+    loading: false,
+    toast: '',
+    toastType: 'success',
+    showAddProvider: false,
+    newProvider: { name: '', base_url: '', api_key: '', models: '' },
+    deleteTarget: '',
+
+    async init() {
+      // Apply dark mode class
+      if (this.dark) document.documentElement.classList.add('dark');
+      else document.documentElement.classList.remove('dark');
+
+      // Auto-verify saved token
+      if (this.token) {
+        await this.login(true);
+      }
+    },
+
+    toggleDark() {
+      this.dark = !this.dark;
+      localStorage.setItem('dark', String(this.dark));
+      if (this.dark) document.documentElement.classList.add('dark');
+      else document.documentElement.classList.remove('dark');
+    },
+
+    async login(silent = false) {
+      if (!this.token.trim()) {
+        if (!silent) this.loginError = '请输入 Panel Token';
+        return;
+      }
+      this.loading = true;
+      this.loginError = '';
+      try {
+        const res = await fetch('/api/admin/auth/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: this.token.trim() }),
+        });
+        if (res.ok) {
+          this.authed = true;
+          localStorage.setItem('panel_token', this.token.trim());
+          await this.refreshAll();
+        } else {
+          const err = await res.json().catch(() => ({}));
+          if (!silent) this.loginError = err.detail || 'Token 无效';
+          else { this.token = ''; localStorage.removeItem('panel_token'); }
+        }
+      } catch (e) {
+        if (!silent) this.loginError = '无法连接服务器: ' + e.message;
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    logout() {
+      this.authed = false;
+      this.token = '';
+      localStorage.removeItem('panel_token');
+    },
+
+    async navigate(p) {
+      this.page = p;
+      if (p === 'dashboard') await Promise.all([this.loadStatus(), this.loadUsage()]);
+      else if (p === 'providers') await Promise.all([this.loadConfig(), this.loadStatus()]);
+      else if (p === 'routing') await this.loadRouting();
+      else if (p === 'usage') { await this.loadUsage(); this.$nextTick(() => this.renderChart()); }
+      else if (p === 'logs') await this.loadLogs();
+      else if (p === 'system') await Promise.all([this.loadConfig(), this.loadUpdates()]);
+    },
+
+    async refreshAll() {
+      await Promise.all([this.loadStatus(), this.loadUsage(), this.loadConfig()]);
+      if (this.page === 'routing') await this.loadRouting();
+      if (this.page === 'logs') await this.loadLogs();
+      if (this.page === 'system') await this.loadUpdates();
+      if (this.page === 'usage') this.$nextTick(() => this.renderChart());
+    },
+
+    async api(path, opts = {}) {
+      const headers = { 'X-Panel-Token': this.token, ...(opts.headers || {}) };
+      const res = await fetch(path, { ...opts, headers });
+      if (res.status === 401) { this.logout(); throw new Error('认证失败'); }
+      return res;
+    },
+
+    async loadStatus() {
+      try {
+        const res = await this.api('/api/admin/status');
+        if (res.ok) this.status = await res.json();
+      } catch (e) { console.warn('loadStatus:', e); }
+    },
+
+    async loadConfig() {
+      try {
+        const res = await this.api('/api/admin/config');
+        if (res.ok) {
+          this.config = await res.json();
+          this.providers = this.config.providers || [];
+        }
+      } catch (e) { console.warn('loadConfig:', e); }
+    },
+
+    async loadUsage() {
+      try {
+        const res = await this.api('/api/admin/usage?period=' + this.usagePeriod);
+        if (res.ok) {
+          this.usage = await res.json();
+          if (this.page === 'usage') this.$nextTick(() => this.renderChart());
+        }
+      } catch (e) { console.warn('loadUsage:', e); }
+    },
+
+    async loadRouting() {
+      try {
+        const res = await this.api('/api/admin/routing');
+        if (res.ok) {
+          this.routing = await res.json();
+          this.routingStrategy = this.routing.strategy || 'fallback';
+          this.routingScenarios = { ...(this.routing.scenarios || {}) };
+        }
+      } catch (e) { console.warn('loadRouting:', e); }
+    },
+
+    async loadUpdates() {
+      try {
+        const res = await this.api('/api/admin/updates');
+        if (res.ok) this.updates = await res.json();
+      } catch (e) { console.warn('loadUpdates:', e); }
+    },
+
+    async loadLogs() {
+      try {
+        const res = await this.api('/api/admin/logs?n=' + this.logLines);
+        if (res.ok) {
+          const data = await res.json();
+          this.logs = data.lines || [];
+          this.$nextTick(() => {
+            const c = document.getElementById('logContainer');
+            if (c) c.scrollTop = c.scrollHeight;
+          });
+        }
+      } catch (e) { console.warn('loadLogs:', e); }
+    },
+
+    async doAddProvider() {
+      const models = this.newProvider.models.split('\n').map(s => s.trim()).filter(Boolean);
+      if (!this.newProvider.name || !this.newProvider.base_url || !this.newProvider.api_key) {
+        this.showToast('请填写所有必填字段', 'error'); return;
+      }
+      this.loading = true;
+      try {
+        const res = await this.api('/api/admin/providers', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: this.newProvider.name,
+            base_url: this.newProvider.base_url,
+            api_key: this.newProvider.api_key,
+            models: models,
+          }),
+        });
+        if (res.ok) {
+          this.showAddProvider = false;
+          this.newProvider = { name: '', base_url: '', api_key: '', models: '' };
+          await this.loadConfig();
+          this.showToast('Provider 添加成功！');
+        } else {
+          const err = await res.json().catch(() => ({}));
+          this.showToast(err.detail || '添加失败', 'error');
+        }
+      } catch (e) {
+        this.showToast('操作失败: ' + e.message, 'error');
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    confirmDelete(name) {
+      this.deleteTarget = name;
+    },
+
+    async doDeleteProvider() {
+      if (!this.deleteTarget) return;
+      this.loading = true;
+      try {
+        const res = await this.api('/api/admin/providers/' + encodeURIComponent(this.deleteTarget), {
+          method: 'DELETE',
+        });
+        if (res.ok) {
+          this.deleteTarget = '';
+          await this.loadConfig();
+          this.showToast('Provider 已删除');
+        } else {
+          const err = await res.json().catch(() => ({}));
+          this.showToast(err.detail || '删除失败', 'error');
+        }
+      } catch (e) {
+        this.showToast('操作失败: ' + e.message, 'error');
+      } finally {
+        this.loading = false;
+        this.deleteTarget = '';
+      }
+    },
+
+    async saveRouting() {
+      this.loading = true;
+      try {
+        const res = await this.api('/api/admin/routing', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ strategy: this.routingStrategy, scenarios: this.routingScenarios }),
+        });
+        if (res.ok) this.showToast('路由配置已保存');
+        else {
+          const err = await res.json().catch(() => ({}));
+          this.showToast(err.detail || '保存失败', 'error');
+        }
+      } catch (e) {
+        this.showToast('操作失败: ' + e.message, 'error');
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    addScenario() {
+      const key = prompt('场景名称（如 coding、translation）：');
+      if (key && key.trim()) {
+        this.routingScenarios = { ...this.routingScenarios, [key.trim()]: '' };
+      }
+    },
+
+    deleteScenario(key) {
+      const s = { ...this.routingScenarios };
+      delete s[key];
+      this.routingScenarios = s;
+    },
+
+    showToast(msg, type = 'success') {
+      this.toast = msg;
+      this.toastType = type;
+      setTimeout(() => { this.toast = ''; }, 3500);
+    },
+
+    formatTs(ts) {
+      if (!ts) return '—';
+      const d = new Date(ts * 1000);
+      return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    },
+
+    logLineClass(line) {
+      const up = line.toUpperCase();
+      if (up.includes('ERROR') || up.includes('CRITICAL')) return 'log-line-error';
+      if (up.includes('WARN')) return 'log-line-warning';
+      if (up.includes('DEBUG')) return 'log-line-debug';
+      return 'log-line-info';
+    },
+
+    topModel() {
+      const bm = this.usage?.by_model || {};
+      const entries = Object.entries(bm);
+      if (!entries.length) return '—';
+      return entries.sort((a, b) => b[1].requests - a[1].requests)[0][0];
+    },
+
+    modelPercent(model) {
+      const bm = this.usage?.by_model || {};
+      const max = Math.max(...Object.values(bm).map(v => v.requests), 1);
+      return Math.round(((bm[model]?.requests || 0) / max) * 100);
+    },
+
+    renderChart() {
+      const canvas = document.getElementById('usageChart');
+      if (!canvas) return;
+
+      if (_usageChart) { _usageChart.destroy(); _usageChart = null; }
+
+      const daily = this.usage?.daily || {};
+      const sortedDays = Object.keys(daily).sort();
+      const isDark = this.dark;
+
+      _usageChart = new Chart(canvas, {
+        type: 'line',
+        data: {
+          labels: sortedDays.length ? sortedDays : ['暂无数据'],
+          datasets: [{
+            label: 'Tokens',
+            data: sortedDays.length ? sortedDays.map(d => daily[d]?.tokens || 0) : [0],
+            borderColor: '#6366f1',
+            backgroundColor: 'rgba(99,102,241,0.1)',
+            tension: 0.4,
+            fill: true,
+            pointBackgroundColor: '#6366f1',
+            pointRadius: 4,
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: ctx => ' ' + ctx.parsed.y.toLocaleString() + ' tokens'
+              }
+            }
+          },
+          scales: {
+            x: {
+              grid: { color: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' },
+              ticks: { color: isDark ? '#94a3b8' : '#64748b', font: { size: 11 } },
+            },
+            y: {
+              grid: { color: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' },
+              ticks: { color: isDark ? '#94a3b8' : '#64748b', font: { size: 11 } },
+            },
+          },
+        },
+      });
+    },
+  };
+}
+</script>
+</body>
+</html>

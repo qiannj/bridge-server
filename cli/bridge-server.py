@@ -470,6 +470,48 @@ def cmd_setup():
     else:
         print_error("配置向导不存在")
 
+def cmd_panel_token(reset: bool = False):
+    """生成或显示面板访问 Token"""
+    sys.path.insert(0, str(INSTALL_DIR / 'src'))
+    try:
+        from bridge_server.admin_api import get_panel_token, generate_panel_token
+    except ImportError:
+        import yaml as _yaml
+        config_dir = Path.home() / ".bridge-server"
+        auth_file = config_dir / "auth.yaml"
+        auth = {}
+        if auth_file.exists():
+            with open(auth_file) as f:
+                auth = _yaml.safe_load(f) or {}
+        if reset or 'panel_token' not in auth:
+            import secrets as _secrets
+            _token = "pt-" + _secrets.token_hex(24)
+            auth['panel_token'] = _token
+            config_dir.mkdir(parents=True, exist_ok=True)
+            with open(auth_file, 'w') as f:
+                _yaml.safe_dump(auth, f)
+        _stored = auth.get('panel_token', '')
+        get_panel_token = lambda: _stored
+        generate_panel_token = lambda: _stored
+
+    token = get_panel_token()
+    if not token or reset:
+        token = generate_panel_token()
+        print_success("已生成新的 Panel Token")
+
+    config = load_config()
+    port = config.get('server', {}).get('port', 19377)
+
+    print()
+    print(f"{Colors.BOLD}Bridge Server 管理面板{Colors.ENDC}")
+    print()
+    print(f"  面板地址：{Colors.CYAN}http://localhost:{port}/ui{Colors.ENDC}")
+    print(f"  Panel Token：{Colors.GREEN}{token}{Colors.ENDC}")
+    print()
+    print(f"  直接访问（带 token）：")
+    print(f"  {Colors.CYAN}http://localhost:{port}/ui?token={token}{Colors.ENDC}")
+    print()
+
 def cmd_route_test(text: str):
     """测试路由"""
     print(f"\n{Colors.BOLD}路由测试{Colors.ENDC}\n")
@@ -690,6 +732,7 @@ def print_help():
     restore         恢复配置
     setup           运行配置向导
     benchmark       模型能力基准测试
+    panel-token     生成或显示管理面板 Token（--reset 重新生成）
 
   其他:
     help            显示帮助
@@ -752,6 +795,9 @@ def main():
         cmd_restore(sys.argv[2])
     elif command == "setup":
         cmd_setup()
+    elif command == "panel-token":
+        reset = "--reset" in sys.argv
+        cmd_panel_token(reset)
     elif command == "benchmark":
         cmd_benchmark()
     elif command == "route-test":
