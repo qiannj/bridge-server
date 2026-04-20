@@ -738,18 +738,35 @@ class SetupWizard:
         self._finish()
     
     def _start_service(self):
-        """启动服务"""
-        import subprocess
+        """启动服务（先停止旧进程）"""
+        import subprocess, signal, os, time
         
         print(f"\n{Colors.CYAN}启动服务...{Colors.ENDC}")
         
-        # 查找 Python 可执行文件
         python_exe = sys.executable
-        
+        host = self.config['server'].get('host', '0.0.0.0')
+        port = str(self.config['server'].get('port', get_default_port()))
+
+        # 先停止占用同一端口的旧进程
+        try:
+            result = subprocess.run(
+                ['lsof', '-ti', f':{port}'],
+                capture_output=True, text=True
+            )
+            pids = [p.strip() for p in result.stdout.strip().split('\n') if p.strip()]
+            for pid_str in pids:
+                try:
+                    os.kill(int(pid_str), signal.SIGTERM)
+                except (ValueError, ProcessLookupError):
+                    pass
+            if pids:
+                time.sleep(1.5)
+                print(f"{Colors.YELLOW}  已停止旧服务 (PID: {', '.join(pids)}){Colors.ENDC}")
+        except Exception:
+            pass
+
         try:
             log_file = open(self.config_dir / 'server.log', 'a')
-            host = self.config['server'].get('host', '0.0.0.0')
-            port = str(self.config['server'].get('port', get_default_port()))
             process = subprocess.Popen(
                 [python_exe, '-m', 'uvicorn', 'bridge_server.runtime:app', '--app-dir', 'src', '--host', host, '--port', port],
                 stdout=log_file,

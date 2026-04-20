@@ -4,10 +4,11 @@ OpenAI Provider - OpenAI官方接口
 支持 GPT-4, GPT-3.5 等模型
 """
 
+import asyncio
 import json
 import os
 from typing import Dict, Any, AsyncGenerator
-from .base import BaseProvider, ModelInfo, ProviderFactory
+from .base import BaseProvider, ModelInfo, ProviderFactory, ProviderStatus
 
 
 class OpenAIProvider(BaseProvider):
@@ -78,6 +79,24 @@ class OpenAIProvider(BaseProvider):
                 })
         return formatted
     
+    async def health_check(self) -> ProviderStatus:
+        """用 GET /models 做轻量探活，避免 thinking 模型超时。"""
+        try:
+            response = await asyncio.wait_for(
+                self.client.get("/models"),
+                timeout=10.0,
+            )
+            # 200 = OK；401/403 = key 问题但服务可达（视为 healthy，key 在配置时已验证）
+            if response.status_code < 500:
+                return ProviderStatus.HEALTHY
+            return ProviderStatus.UNHEALTHY
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                f"健康检查失败 | Provider: {self.provider_id} | {e}"
+            )
+            return ProviderStatus.UNHEALTHY
+
     async def _make_request(self, messages: list, model: str = None, **kwargs) -> Dict[str, Any]:
         """发起OpenAI请求"""
         model = model or "gpt-3.5-turbo"
