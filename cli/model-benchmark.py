@@ -140,7 +140,7 @@ BENCHMARK_QUESTIONS: Dict[str, List[Dict]] = {
         },
         {
             "id": "chat_3",
-            "prompt": "我朋友说"人生苦短，及时行乐"，我觉得这句话有点问题，你怎么看？",
+            "prompt": "我朋友说「人生苦短，及时行乐」，我觉得这句话有点问题，你怎么看？",
             "check": lambda r: bool(re.search(r"但|然而|不过|另一方面|平衡|责任|意义|价值", r)),
             "check_desc": "有辩证思考",
         },
