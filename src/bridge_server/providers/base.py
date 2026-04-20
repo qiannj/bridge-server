@@ -65,6 +65,17 @@ class BaseProvider(ABC):
         self.config = config
         self.provider_id = config.get("id", self.__class__.__name__)
         self.models = self._load_models()
+        # 若 config 里传入了 models 列表，以其为准（自定义 provider 场景）
+        config_models = config.get("models")
+        if config_models:
+            extra = {
+                m: ModelInfo(id=m, name=m, max_tokens=4096,
+                             input_cost_per_1k=0.0, output_cost_per_1k=0.0,
+                             supports_streaming=True, context_window=128000)
+                for m in config_models if m not in self.models
+            }
+            if extra:
+                self.models = {**extra, **self.models}
         self.client = self._create_http_client()
         self.metrics = ProviderMetrics()
         
