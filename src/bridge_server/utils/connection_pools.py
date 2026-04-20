@@ -273,8 +273,10 @@ class ConnectionPoolManager:
         http2_enabled = bool(http2 and importlib.util.find_spec("h2"))
         if http2 and not http2_enabled:
             logger.info("未检测到 h2 依赖，Provider HTTP 客户端回退到 HTTP/1.1")
+        # 确保 base_url 以 '/' 结尾，避免 httpx 按 RFC 3986 规则丢弃最后一段路径
+        normalized_base_url = base_url.rstrip('/') + '/' if base_url else base_url
         client = httpx.AsyncClient(
-            base_url=base_url,
+            base_url=normalized_base_url,
             headers=headers,
             limits=httpx.Limits(
                 max_connections=max_connections or http_config["connector_limit"],
