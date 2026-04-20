@@ -147,6 +147,7 @@ def _build_providers_config(config: Dict[str, Any]) -> List[ProviderConfig]:
                 "api_key": api_key,
                 "base_url": base_url,
                 "models": [m.get("id") for m in p.get("models", []) if m.get("id")],
+                "timeout": p.get("timeout", 120.0),  # 默认 120s，支持 thinking 类模型
             },
             weight=max(1, len(yaml_providers) - idx),
             priority=idx + 1,
