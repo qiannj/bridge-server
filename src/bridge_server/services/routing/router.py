@@ -36,7 +36,7 @@ class RouteResult:
     from_cache: bool = False
     
     @classmethod
-    def from_cache(cls, cached_data: Dict) -> 'RouteResult':
+    def from_cached_data(cls, cached_data: Dict) -> 'RouteResult':
         """从缓存数据创建路由结果"""
         return cls(
             provider_id=cached_data["provider_id"],
@@ -357,7 +357,7 @@ class SmartRouter:
         try:
             cached_data = await self.cache.get(cache_key)
             if cached_data:
-                return RouteResult.from_cache(cached_data)
+                return RouteResult.from_cached_data(cached_data)
         except Exception as e:
             logger.warning(f"缓存读取失败: {str(e)}")
         
