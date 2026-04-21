@@ -509,6 +509,95 @@ def cmd_panel_token(reset: bool = False):
     print(f"  Panel Token：{Colors.GREEN}{token}{Colors.ENDC}")
     print()
 
+
+def _parse_cli_value(prefix: str, default=None):
+    for arg in sys.argv:
+        if arg.startswith(prefix + "="):
+            return arg.split("=", 1)[1]
+    return default
+
+
+def cmd_api_key(args):
+    """管理外部连接 API Keys。"""
+    sub = args[0].lower() if args else "list"
+    try:
+        if sub == "list":
+            resp = _admin_api("GET", "/api-keys")
+            resp.raise_for_status()
+            keys = resp.json().get("api_keys", [])
+            print(f"\n{Colors.BOLD}外部连接 API Keys{Colors.ENDC}\n")
+            if not keys:
+                print_info("暂无 API Key")
+                return
+            for item in keys:
+                expires = item.get("expires_at_iso") or "永不过期"
+                active = f"{Colors.GREEN}启用{Colors.ENDC}" if item.get("active") else f"{Colors.RED}停用{Colors.ENDC}"
+                models = ", ".join(item.get("model_permissions") or ["*"])
+                print(f"  {item['id']}  {Colors.BOLD}{item['name']}{Colors.ENDC}  {active}")
+                print(f"      Key: {item.get('key_preview', 'sk-****')}  截止: {expires}")
+                print(f"      模型权限: {models}")
+            print()
+            return
+
+        if sub == "create":
+            if len(args) < 2:
+                print_error("用法: bridge-server api-key create <名称> [--models=a,b] [--expires=YYYY-MM-DDTHH:MM:SS]")
+                return
+            name = args[1]
+            models = _parse_cli_value("--models", "*")
+            expires = _parse_cli_value("--expires", None)
+            body = {
+                "name": name,
+                "model_permissions": [m.strip() for m in models.split(",") if m.strip()],
+            }
+            if expires:
+                body["expires_at_iso"] = expires
+            resp = _admin_api("POST", "/api-keys", json_data=body)
+            resp.raise_for_status()
+            item = resp.json()["api_key"]
+            print_success(f"已创建 API Key: {item['name']}")
+            print_warning("请立即保存，明文 Key 只显示这一次。")
+            print(f"\n  API Key: {Colors.GREEN}{item['token']}{Colors.ENDC}\n")
+            return
+
+        if sub == "update":
+            if len(args) < 2:
+                print_error("用法: bridge-server api-key update <id> [--name=新名称] [--models=a,b] [--expires=YYYY-MM-DDTHH:MM:SS] [--clear-expires] [--active=true|false]")
+                return
+            key_id = args[1]
+            body = {}
+            name = _parse_cli_value("--name", None)
+            models = _parse_cli_value("--models", None)
+            expires = _parse_cli_value("--expires", None)
+            active = _parse_cli_value("--active", None)
+            if name is not None:
+                body["name"] = name
+            if models is not None:
+                body["model_permissions"] = [m.strip() for m in models.split(",") if m.strip()]
+            if expires is not None:
+                body["expires_at_iso"] = expires
+            if "--clear-expires" in sys.argv:
+                body["clear_expires_at"] = True
+            if active is not None:
+                body["active"] = active.lower() in ("1", "true", "yes", "y", "on")
+            resp = _admin_api("PUT", f"/api-keys/{key_id}", json_data=body)
+            resp.raise_for_status()
+            print_success("API Key 已更新")
+            return
+
+        if sub in ("delete", "revoke"):
+            if len(args) < 2:
+                print_error("用法: bridge-server api-key delete <id>")
+                return
+            resp = _admin_api("DELETE", f"/api-keys/{args[1]}")
+            resp.raise_for_status()
+            print_success("API Key 已停用")
+            return
+
+        print_error(f"未知 api-key 子命令: {sub}  (可用: list, create, update, delete)")
+    except Exception as e:
+        print_error(str(e))
+
 def cmd_route_test(text: str):
     """测试路由"""
     print(f"\n{Colors.BOLD}路由测试{Colors.ENDC}\n")
@@ -832,6 +921,7 @@ def print_help():
     setup           运行配置向导
     benchmark       模型能力基准测试
     panel-token     显示/生成管理面板 Token（--reset 重新生成）
+    api-key        管理外部连接 API Keys
 
   其他:
     help            显示帮助
@@ -843,6 +933,8 @@ def print_help():
   bridge-server scenario set coding my-provider/gpt-4o-mini
   bridge-server reload
   bridge-server panel-token
+  bridge-server api-key list
+  bridge-server api-key create app-a --models=scnet/Qwen3-235B-A22B,scnet/MiniMax-M2.5 --expires=2026-05-01T00:00:00
   bridge-server logs 100
   bridge-server route-test "用 Python 写个快速排序"
 """
@@ -898,6 +990,8 @@ def main():
     elif command == "panel-token":
         reset = "--reset" in sys.argv
         cmd_panel_token(reset)
+    elif command == "api-key":
+        cmd_api_key(sys.argv[2:])
     elif command == "benchmark":
         cmd_benchmark()
     elif command == "route-test":
