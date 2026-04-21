@@ -18,6 +18,14 @@ from .utils.connection_pools import get_connection_pool_manager, get_db_connecti
 logger = logging.getLogger(__name__)
 
 
+_USAGE_RECORDS_ADDITIONAL_COLUMNS = {
+    "baseline_model": "TEXT",
+    "baseline_cost_rmb": "REAL DEFAULT 0.0",
+    "savings_rmb": "REAL DEFAULT 0.0",
+    "baseline_source": "TEXT DEFAULT 'default'",
+}
+
+
 class UsageTrackerAsync:
     """异步用量跟踪器"""
     
@@ -78,6 +86,15 @@ class UsageTrackerAsync:
                         created_at REAL DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
+
+                async with conn.execute("PRAGMA table_info(usage_records)") as cursor:
+                    existing_columns = {row[1] for row in await cursor.fetchall()}
+
+                for column_name, column_def in _USAGE_RECORDS_ADDITIONAL_COLUMNS.items():
+                    if column_name not in existing_columns:
+                        await conn.execute(
+                            f"ALTER TABLE usage_records ADD COLUMN {column_name} {column_def}"
+                        )
                 
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_date ON usage_records(date)")
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_user_date ON usage_records(user_id, date)")
@@ -170,8 +187,9 @@ class UsageTrackerAsync:
                 INSERT INTO usage_records (
                     timestamp, date, user_id, model, provider, task_type,
                     input_tokens, output_tokens, total_tokens, 
-                    cost_usd, cost_rmb, duration_ms, success
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    cost_usd, cost_rmb, duration_ms, success,
+                    baseline_model, baseline_cost_rmb, savings_rmb, baseline_source
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
             
             records = []
@@ -189,7 +207,11 @@ class UsageTrackerAsync:
                     record.get("cost_usd", 0.0),
                     record.get("cost_rmb", 0.0),
                     record.get("duration_ms", 0.0),
-                    record.get("success", True)
+                    record.get("success", True),
+                    record.get("baseline_model"),
+                    record.get("baseline_cost_rmb", 0.0),
+                    record.get("savings_rmb", 0.0),
+                    record.get("baseline_source", "default"),
                 ))
             
             async with await get_db_connection() as conn:
@@ -211,7 +233,11 @@ class UsageTrackerAsync:
         user_id: str = "unknown",
         task_type: str = "general",
         duration_ms: float = 0.0,
-        success: bool = True
+        success: bool = True,
+        baseline_model: Optional[str] = None,
+        baseline_cost_rmb: Optional[float] = None,
+        savings_rmb: Optional[float] = None,
+        baseline_source: str = "default"
     ) -> None:
         """记录用量（异步，加入写入队列）"""
         
@@ -231,7 +257,11 @@ class UsageTrackerAsync:
             "cost_usd": cost_usd,
             "cost_rmb": cost_rmb,
             "duration_ms": duration_ms,
-            "success": success
+            "success": success,
+            "baseline_model": baseline_model,
+            "baseline_cost_rmb": baseline_cost_rmb if baseline_cost_rmb is not None else 0.0,
+            "savings_rmb": savings_rmb if savings_rmb is not None else 0.0,
+            "baseline_source": baseline_source,
         }
         
         # 加入写入队列
@@ -383,7 +413,11 @@ async def record_usage_async(
     user_id: str = "unknown",
     task_type: str = "general",
     duration_ms: float = 0.0,
-    cost_usd: float = 0.0
+    cost_usd: float = 0.0,
+    baseline_model: Optional[str] = None,
+    baseline_cost_rmb: Optional[float] = None,
+    savings_rmb: Optional[float] = None,
+    baseline_source: str = "default"
 ) -> None:
     """便捷的异步用量记录函数"""
     tracker = await get_usage_tracker()
@@ -396,5 +430,9 @@ async def record_usage_async(
         user_id=user_id,
         task_type=task_type,
         duration_ms=duration_ms,
-        success=True
+        success=True,
+        baseline_model=baseline_model,
+        baseline_cost_rmb=baseline_cost_rmb,
+        savings_rmb=savings_rmb,
+        baseline_source=baseline_source,
     )

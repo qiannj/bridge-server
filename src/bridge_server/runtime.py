@@ -54,6 +54,7 @@ from .observability import (
     setup_structured_logging,
 )
 from .services.routing import SmartRouter
+from .services.savings import estimate_baseline_cost_rmb, estimate_model_cost_usd, resolve_baseline_model
 from .utils.cache import HybridCache
 from .utils.connection_pools import close_connection_pool_manager, get_connection_pool_manager
 
@@ -956,14 +957,43 @@ async def _record_usage_background(
     
     try:
         if usage_tracker:
+            prompt_tokens = usage_info.get("prompt_tokens", 0)
+            completion_tokens = usage_info.get("completion_tokens", 0)
+            actual_model_ref = f"{route_result.provider_id}/{route_result.model}"
+            cost_usd = estimate_model_cost_usd(
+                model_ref=actual_model_ref,
+                input_tokens=prompt_tokens,
+                output_tokens=completion_tokens,
+                provider_manager=provider_manager,
+            )
+
+            savings_config = runtime_config.get("savings") or {}
+            baseline_model, baseline_source = resolve_baseline_model(route_result.task_type, savings_config)
+            baseline_cost_rmb = None
+            savings_rmb = None
+            if baseline_model:
+                baseline_cost_rmb = estimate_baseline_cost_rmb(
+                    baseline_model=baseline_model,
+                    input_tokens=prompt_tokens,
+                    output_tokens=completion_tokens,
+                    provider_manager=provider_manager,
+                )
+                if baseline_cost_rmb is not None and cost_usd is not None:
+                    savings_rmb = baseline_cost_rmb - (cost_usd * 7.2)
+
             await record_usage_async(
                 model=route_result.model,
                 provider=route_result.provider_id,
-                input_tokens=usage_info.get("prompt_tokens", 0),
-                output_tokens=usage_info.get("completion_tokens", 0),
+                input_tokens=prompt_tokens,
+                output_tokens=completion_tokens,
                 user_id=current_user.get("user_id", "unknown"),
                 task_type=route_result.task_type,
-                duration_ms=duration_ms
+                duration_ms=duration_ms,
+                cost_usd=cost_usd or 0.0,
+                baseline_model=baseline_model,
+                baseline_cost_rmb=baseline_cost_rmb,
+                savings_rmb=savings_rmb,
+                baseline_source=baseline_source,
             )
     except Exception as e:
         logger.warning(f"用量记录失败: {str(e)}")

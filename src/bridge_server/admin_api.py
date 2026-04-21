@@ -14,7 +14,7 @@ import httpx
 import yaml
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 GITHUB_REPO = "qiannj/bridge-server"
 GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -327,6 +327,184 @@ def _query_usage(days: int = 1) -> Dict[str, Any]:
 async def get_usage(period: str = Query("today")):
     days = {"today": 1, "week": 7, "month": 30}.get(period, 1)
     return _query_usage(days)
+
+
+# ── Savings ───────────────────────────────────────────────────────────────────
+
+def _empty_savings_payload(days: int) -> Dict[str, Any]:
+    return {
+        "period_days": days,
+        "summary": {
+            "total_requests": 0,
+            "covered_requests": 0,
+            "uncovered_requests": 0,
+            "actual_cost_rmb": 0.0,
+            "baseline_cost_rmb": 0.0,
+            "savings_rmb": 0.0,
+            "savings_rate": 0.0,
+        },
+        "by_model": {},
+        "by_task_type": {},
+        "daily": {},
+        "records": [],
+    }
+
+
+def _normalize_savings_config(raw: Optional[dict]) -> Dict[str, Any]:
+    savings = raw or {}
+    baseline = savings.get("baseline") or {}
+    scenarios = baseline.get("scenarios") or {}
+
+    normalized_scenarios = {}
+    if isinstance(scenarios, dict):
+        for task_type, model_ref in scenarios.items():
+            task_key = str(task_type or "").strip()
+            model_value = str(model_ref or "").strip()
+            if task_key and model_value:
+                normalized_scenarios[task_key] = model_value
+
+    return {
+        "enabled": bool(savings.get("enabled", False)),
+        "baseline": {
+            "default_model": str(baseline.get("default_model") or "").strip(),
+            "scenarios": normalized_scenarios,
+        },
+    }
+
+
+def _query_savings(days: int = 1) -> Dict[str, Any]:
+    db_path = _get_config_dir() / "usage.db"
+    if not db_path.exists():
+        return _empty_savings_payload(days)
+
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    try:
+        since = time.time() - days * 86400
+        rows = conn.execute(
+            "SELECT * FROM usage_records WHERE timestamp >= ? ORDER BY timestamp DESC LIMIT 500",
+            (since,),
+        ).fetchall()
+        if not rows:
+            return _empty_savings_payload(days)
+
+        records = [dict(r) for r in rows]
+        summary = {
+            "total_requests": len(records),
+            "covered_requests": 0,
+            "uncovered_requests": 0,
+            "actual_cost_rmb": 0.0,
+            "baseline_cost_rmb": 0.0,
+            "savings_rmb": 0.0,
+            "savings_rate": 0.0,
+        }
+        by_model: Dict[str, Dict[str, Any]] = {}
+        by_task_type: Dict[str, Dict[str, Any]] = {}
+        daily: Dict[str, Dict[str, Any]] = {}
+
+        def _bucket(target: Dict[str, Dict[str, Any]], key: str) -> Dict[str, Any]:
+            target.setdefault(
+                key,
+                {
+                    "requests": 0,
+                    "covered_requests": 0,
+                    "actual_cost_rmb": 0.0,
+                    "baseline_cost_rmb": 0.0,
+                    "savings_rmb": 0.0,
+                },
+            )
+            return target[key]
+
+        for record in records:
+            actual_cost_rmb = float(record.get("cost_rmb") or ((record.get("cost_usd") or 0.0) * 7.2))
+            baseline_cost_rmb = float(record.get("baseline_cost_rmb") or 0.0)
+            savings_rmb = float(record.get("savings_rmb") or 0.0)
+            is_covered = bool(record.get("baseline_model")) and baseline_cost_rmb > 0
+
+            summary["actual_cost_rmb"] += actual_cost_rmb
+            summary["baseline_cost_rmb"] += baseline_cost_rmb
+            summary["savings_rmb"] += savings_rmb
+            if is_covered:
+                summary["covered_requests"] += 1
+            else:
+                summary["uncovered_requests"] += 1
+
+            model_bucket = _bucket(by_model, record.get("model") or "unknown")
+            task_bucket = _bucket(by_task_type, record.get("task_type") or "general")
+            day_bucket = _bucket(
+                daily,
+                datetime.fromtimestamp(record["timestamp"]).strftime("%Y-%m-%d"),
+            )
+
+            for bucket in (model_bucket, task_bucket, day_bucket):
+                bucket["requests"] += 1
+                bucket["actual_cost_rmb"] += actual_cost_rmb
+                bucket["baseline_cost_rmb"] += baseline_cost_rmb
+                bucket["savings_rmb"] += savings_rmb
+                if is_covered:
+                    bucket["covered_requests"] += 1
+
+        if summary["baseline_cost_rmb"] > 0:
+            summary["savings_rate"] = summary["savings_rmb"] / summary["baseline_cost_rmb"]
+
+        sorted_daily = {key: daily[key] for key in sorted(daily)}
+        return {
+            "period_days": days,
+            "summary": summary,
+            "by_model": by_model,
+            "by_task_type": by_task_type,
+            "daily": sorted_daily,
+            "records": records[:50],
+        }
+    finally:
+        conn.close()
+
+
+class SavingsBaselineConfig(BaseModel):
+    default_model: str = ""
+    scenarios: Dict[str, str] = Field(default_factory=dict)
+
+
+class SavingsConfigUpdateRequest(BaseModel):
+    enabled: bool = False
+    baseline: SavingsBaselineConfig = Field(default_factory=SavingsBaselineConfig)
+
+
+@router.get("/savings", dependencies=_deps)
+async def get_savings(period: str = Query("today")):
+    days = {"today": 1, "week": 7, "month": 30}.get(period, 1)
+    return _query_savings(days)
+
+
+@router.get("/savings/config", dependencies=_deps)
+async def get_savings_config():
+    config = _load_yaml(_get_config_dir() / "config.yaml")
+    return _normalize_savings_config(config.get("savings"))
+
+
+@router.put("/savings/config", dependencies=_deps)
+async def update_savings_config(req: SavingsConfigUpdateRequest):
+    config_file = _get_config_dir() / "config.yaml"
+    config = _load_yaml(config_file)
+    normalized = _normalize_savings_config(req.model_dump())
+    config["savings"] = normalized
+    _save_yaml(config_file, config)
+
+    try:
+        import importlib
+        import sys
+
+        _rt = sys.modules.get("bridge_server.runtime")
+        if _rt is None:
+            _rt = importlib.import_module("bridge_server.runtime")
+
+        if not isinstance(getattr(_rt, "runtime_config", None), dict):
+            _rt.runtime_config = {}
+        _rt.runtime_config["savings"] = normalized
+    except Exception:
+        pass
+
+    return {"ok": True, "config": normalized}
 
 
 # ── Updates ───────────────────────────────────────────────────────────────────
