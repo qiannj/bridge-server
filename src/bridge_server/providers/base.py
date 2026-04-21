@@ -64,6 +64,23 @@ class BaseProvider(ABC):
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.provider_id = config.get("id", self.__class__.__name__)
+
+        # ── OAuth 2.0 Client Credentials support ────────────────────────────
+        # Must be initialised before _create_http_client() so the async event
+        # hook (_inject_oauth_header) can reference it.
+        self._oauth_manager = None
+        if config.get("auth_type") == "oauth":
+            from .oauth_manager import OAuthTokenManager
+            oauth_cfg = config.get("oauth") or {}
+            self._oauth_manager = OAuthTokenManager(
+                token_url=oauth_cfg.get("token_url", ""),
+                client_id=oauth_cfg.get("client_id", ""),
+                client_secret=oauth_cfg.get("client_secret", ""),
+                scope=oauth_cfg.get("scope"),
+                grant_type=oauth_cfg.get("grant_type", "client_credentials"),
+                extra_params=oauth_cfg.get("extra_params"),
+            )
+
         self.models = self._load_models()
         # 若 config 里传入了 models 列表，以其为准（自定义 provider 场景）
         config_models = config.get("models")
@@ -86,6 +103,11 @@ class BaseProvider(ABC):
         self._uses_shared_http_client = True
         from ..utils.connection_pools import get_provider_http_client
 
+        # Build request hooks: observability first, then OAuth token injection
+        request_hooks = [self._inject_observability_headers]
+        if self._oauth_manager is not None:
+            request_hooks.append(self._inject_oauth_header)
+
         return get_provider_http_client(
             self.provider_id,
             base_url=self.config.get("base_url", ""),
@@ -95,7 +117,7 @@ class BaseProvider(ABC):
             max_connections=self.config.get("max_connections", 50),
             max_keepalive_connections=self.config.get("max_keepalive_connections", 20),
             follow_redirects=True,
-            event_hooks={"request": [self._inject_observability_headers]},
+            event_hooks={"request": request_hooks},
         )
 
     async def _inject_observability_headers(self, request: httpx.Request) -> None:
@@ -104,6 +126,16 @@ class BaseProvider(ABC):
 
         for header, value in get_trace_headers().items():
             request.headers[header] = value
+
+    async def _inject_oauth_header(self, request: httpx.Request) -> None:
+        """Inject Bearer token from OAuth manager (replaces static Authorization)."""
+        if self._oauth_manager is not None:
+            try:
+                token = await self._oauth_manager.get_token()
+                request.headers["Authorization"] = f"Bearer {token}"
+            except Exception as e:
+                logger.error(f"OAuth token 获取失败 | Provider: {self.provider_id} | {e}")
+                raise
     
     @abstractmethod
     def _get_headers(self) -> Dict[str, str]:

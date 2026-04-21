@@ -824,10 +824,52 @@
         <input x-model="newProvider.base_url" type="url" placeholder="https://api.example.com/v1"
           class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent" required />
       </div>
+      <!-- Auth Type Toggle -->
       <div>
+        <label class="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-2">认证方式</label>
+        <div class="flex gap-2">
+          <button type="button" @click="newProvider.auth_type = 'api_key'"
+            :class="newProvider.auth_type === 'api_key' ? 'bg-brand-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'"
+            class="flex-1 py-1.5 rounded-lg text-sm font-medium transition-colors">
+            🔑 API Key
+          </button>
+          <button type="button" @click="newProvider.auth_type = 'oauth'"
+            :class="newProvider.auth_type === 'oauth' ? 'bg-brand-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'"
+            class="flex-1 py-1.5 rounded-lg text-sm font-medium transition-colors">
+            🔐 OAuth 2.0
+          </button>
+        </div>
+      </div>
+      <!-- API Key fields -->
+      <div x-show="newProvider.auth_type === 'api_key'">
         <label class="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">API Key <span class="text-red-400">*</span></label>
         <input x-model="newProvider.api_key" type="password" placeholder="sk-..."
-          class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent" required />
+          class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent" />
+      </div>
+      <!-- OAuth fields -->
+      <div x-show="newProvider.auth_type === 'oauth'" class="space-y-3 p-3 bg-slate-50 dark:bg-slate-700/50 rounded-lg border border-slate-200 dark:border-slate-600">
+        <div>
+          <label class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Token URL <span class="text-red-400">*</span></label>
+          <input x-model="newProvider.oauth_token_url" type="url" placeholder="https://oauth.example.com/token"
+            class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent" />
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Client ID <span class="text-red-400">*</span></label>
+            <input x-model="newProvider.oauth_client_id" type="text" placeholder="client-id"
+              class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Client Secret <span class="text-red-400">*</span></label>
+            <input x-model="newProvider.oauth_client_secret" type="password" placeholder="secret"
+              class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Scope <span class="text-xs text-slate-400">（可选，空格分隔）</span></label>
+          <input x-model="newProvider.oauth_scope" type="text" placeholder="openid api"
+            class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent" />
+        </div>
       </div>
       <div>
         <label class="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">模型列表 <span class="text-xs text-slate-400">（每行一个）</span></label>
@@ -861,10 +903,42 @@
       <button @click="showEditProvider = false" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xl leading-none">✕</button>
     </div>
     <form @submit.prevent="doEditProvider()" class="px-6 py-5 space-y-4">
-      <div>
+      <!-- Auth type badge -->
+      <div class="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+        <span x-show="editProvider.auth_type === 'oauth'" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 text-xs font-medium">🔐 OAuth 2.0</span>
+        <span x-show="editProvider.auth_type !== 'oauth'" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-medium">🔑 API Key</span>
+        <span class="text-xs">认证模式</span>
+      </div>
+      <!-- API Key section (api_key mode) -->
+      <div x-show="editProvider.auth_type !== 'oauth'">
         <label class="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">API Key <span class="text-xs text-slate-400">（留空保持不变）</span></label>
         <input x-model="editProvider.api_key" type="password" placeholder="sk-... （留空不修改）"
           class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent" />
+      </div>
+      <!-- OAuth section -->
+      <div x-show="editProvider.auth_type === 'oauth'" class="space-y-3 p-3 bg-slate-50 dark:bg-slate-700/50 rounded-lg border border-slate-200 dark:border-slate-600">
+        <div>
+          <label class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Token URL</label>
+          <input x-model="editProvider.oauth_token_url" type="url" placeholder="https://oauth.example.com/token"
+            class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent" />
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Client ID</label>
+            <input x-model="editProvider.oauth_client_id" type="text" placeholder="client-id"
+              class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Client Secret <span class="text-xs text-slate-400">（留空不修改）</span></label>
+            <input x-model="editProvider.oauth_client_secret" type="password" placeholder="（留空不修改）"
+              class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Scope <span class="text-xs text-slate-400">（可选）</span></label>
+          <input x-model="editProvider.oauth_scope" type="text" placeholder="openid api"
+            class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent" />
+        </div>
       </div>
       <div>
         <label class="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">模型列表 <span class="text-xs text-slate-400">（每行一个）</span></label>
@@ -964,11 +1038,11 @@ function app() {
     toast: '',
     toastType: 'success',
     showAddProvider: false,
-    newProvider: { name: '', base_url: '', api_key: '', models: '' },
+    newProvider: { name: '', base_url: '', api_key: '', auth_type: 'api_key', oauth_token_url: '', oauth_client_id: '', oauth_client_secret: '', oauth_scope: '', models: '' },
     deleteTarget: '',
     showEditProvider: false,
     editTarget: '',
-    editProvider: { api_key: '', models: '' },
+    editProvider: { api_key: '', auth_type: 'api_key', oauth_token_url: '', oauth_client_id: '', oauth_client_secret: '', oauth_scope: '', models: '' },
 
     async init() {
       // Apply dark mode class
@@ -1128,24 +1202,41 @@ function app() {
 
     async doAddProvider() {
       const models = this.newProvider.models.split('\n').map(s => s.trim()).filter(Boolean);
-      if (!this.newProvider.name || !this.newProvider.base_url || !this.newProvider.api_key) {
-        this.showToast('请填写所有必填字段', 'error'); return;
+      if (!this.newProvider.name || !this.newProvider.base_url) {
+        this.showToast('请填写 Provider 名称和 Base URL', 'error'); return;
+      }
+      const body = {
+        name: this.newProvider.name,
+        base_url: this.newProvider.base_url,
+        auth_type: this.newProvider.auth_type,
+        models: models,
+      };
+      if (this.newProvider.auth_type === 'oauth') {
+        if (!this.newProvider.oauth_token_url || !this.newProvider.oauth_client_id || !this.newProvider.oauth_client_secret) {
+          this.showToast('OAuth 模式请填写 Token URL、Client ID 和 Client Secret', 'error'); return;
+        }
+        body.oauth = {
+          token_url: this.newProvider.oauth_token_url,
+          client_id: this.newProvider.oauth_client_id,
+          client_secret: this.newProvider.oauth_client_secret,
+        };
+        if (this.newProvider.oauth_scope) body.oauth.scope = this.newProvider.oauth_scope;
+      } else {
+        if (!this.newProvider.api_key) {
+          this.showToast('请填写 API Key', 'error'); return;
+        }
+        body.api_key = this.newProvider.api_key;
       }
       this.loading = true;
       try {
         const res = await this.api('/api/admin/providers', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: this.newProvider.name,
-            base_url: this.newProvider.base_url,
-            api_key: this.newProvider.api_key,
-            models: models,
-          }),
+          body: JSON.stringify(body),
         });
         if (res.ok) {
           this.showAddProvider = false;
-          this.newProvider = { name: '', base_url: '', api_key: '', models: '' };
+          this.newProvider = { name: '', base_url: '', api_key: '', auth_type: 'api_key', oauth_token_url: '', oauth_client_id: '', oauth_client_secret: '', oauth_scope: '', models: '' };
           await this.loadConfig();
           this.showToast('Provider 添加成功！');
         } else {
@@ -1165,8 +1256,15 @@ function app() {
 
     startEdit(p) {
       this.editTarget = p.name;
+      const authType = p.auth_type || 'api_key';
+      const oauth = p.oauth || {};
       this.editProvider = {
+        auth_type: authType,
         api_key: '',
+        oauth_token_url: oauth.token_url || '',
+        oauth_client_id: oauth.client_id || '',
+        oauth_client_secret: '',  // never pre-fill secret
+        oauth_scope: oauth.scope || '',
         models: (p.models || []).map(m => m.id || m).join('\n'),
       };
       this.showEditProvider = true;
@@ -1178,7 +1276,16 @@ function app() {
       this.loading = true;
       try {
         const body = { models };
-        if (this.editProvider.api_key) body.api_key = this.editProvider.api_key;
+        if (this.editProvider.auth_type === 'oauth') {
+          const oauth = {};
+          if (this.editProvider.oauth_token_url) oauth.token_url = this.editProvider.oauth_token_url;
+          if (this.editProvider.oauth_client_id) oauth.client_id = this.editProvider.oauth_client_id;
+          if (this.editProvider.oauth_client_secret) oauth.client_secret = this.editProvider.oauth_client_secret;
+          if (this.editProvider.oauth_scope) oauth.scope = this.editProvider.oauth_scope;
+          if (Object.keys(oauth).length) body.oauth = oauth;
+        } else {
+          if (this.editProvider.api_key) body.api_key = this.editProvider.api_key;
+        }
         const res = await this.api('/api/admin/providers/' + encodeURIComponent(this.editTarget), {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },

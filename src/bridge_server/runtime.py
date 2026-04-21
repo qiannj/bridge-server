@@ -128,7 +128,39 @@ def _build_providers_config(config: Dict[str, Any]) -> List[ProviderConfig]:
     for idx, p in enumerate(yaml_providers):
         name = p.get("name", f"provider_{idx}")
         base_url = p.get("base_url", "")
+        auth_type = p.get("auth_type", "api_key")
 
+        if auth_type == "oauth":
+            # OAuth providers: enabled if oauth.token_url + client_id + client_secret present
+            oauth_cfg = p.get("oauth") or {}
+            enabled = bool(
+                oauth_cfg.get("token_url")
+                and oauth_cfg.get("client_id")
+                and oauth_cfg.get("client_secret")
+            )
+            if not enabled:
+                logger.debug(f"Provider '{name}' OAuth 配置不完整，跳过")
+                continue
+
+            provider_type = _PROVIDER_TYPE_MAP.get(name, "openai")
+            result.append(ProviderConfig(
+                provider_type=provider_type,
+                config={
+                    "id": name,
+                    "base_url": base_url,
+                    "auth_type": "oauth",
+                    "oauth": oauth_cfg,
+                    "models": [m.get("id") for m in p.get("models", []) if m.get("id")],
+                    "timeout": p.get("timeout", 120.0),
+                },
+                weight=max(1, len(yaml_providers) - idx),
+                priority=idx + 1,
+                enabled=True,
+            ))
+            logger.info(f"✓ 从 config.yaml 读取 OAuth Provider: {name} ({provider_type})")
+            continue
+
+        # Standard api_key provider
         # 解析 API Key：优先 api_key_env，其次 api_key 直接值
         api_key_env = p.get("api_key_env", "")
         api_key = os.getenv(api_key_env) if api_key_env else None

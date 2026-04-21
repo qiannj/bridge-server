@@ -111,18 +111,35 @@ async def get_status():
 async def get_config():
     """Return full config (with API keys masked)."""
     config = _load_yaml(_get_config_dir() / "config.yaml")
-    # Mask API keys
+    # Mask sensitive credentials
     for p in config.get("providers", []):
         if "api_key" in p:
             key = p["api_key"]
             p["api_key"] = key[:8] + "****" + key[-4:] if len(key) > 12 else "****"
+        # Mask OAuth client_secret
+        oauth = p.get("oauth")
+        if oauth and "client_secret" in oauth:
+            s = oauth["client_secret"]
+            oauth["client_secret"] = s[:4] + "****" if len(s) > 4 else "****"
     return config
+
+
+class OAuthConfig(BaseModel):
+    token_url: str
+    client_id: str
+    client_secret: str
+    scope: Optional[str] = None
+    grant_type: str = "client_credentials"
 
 
 class ProviderAddRequest(BaseModel):
     name: str
     base_url: str
-    api_key: str
+    # api_key auth
+    api_key: Optional[str] = None
+    # oauth auth
+    auth_type: str = "api_key"  # "api_key" | "oauth"
+    oauth: Optional[OAuthConfig] = None
     models: List[str]
 
 
@@ -134,21 +151,37 @@ async def add_provider(req: ProviderAddRequest):
     # Check duplicate
     if any(p.get("name") == req.name for p in providers):
         raise HTTPException(status_code=409, detail=f"Provider '{req.name}' 已存在")
-    env_var = req.name.upper().replace("-", "_") + "_API_KEY"
-    providers.append({
-        "name": req.name,
-        "base_url": req.base_url,
-        "api_key_env": env_var,
-        "api_key": req.api_key,
-        "models": [{"id": m, "name": m} for m in req.models],
-    })
+
+    if req.auth_type == "oauth":
+        if not req.oauth:
+            raise HTTPException(status_code=422, detail="OAuth 模式需要提供 oauth 配置")
+        entry = {
+            "name": req.name,
+            "base_url": req.base_url,
+            "auth_type": "oauth",
+            "oauth": req.oauth.model_dump(exclude_none=True),
+            "models": [{"id": m, "name": m} for m in req.models],
+        }
+    else:
+        if not req.api_key:
+            raise HTTPException(status_code=422, detail="API Key 模式需要提供 api_key")
+        env_var = req.name.upper().replace("-", "_") + "_API_KEY"
+        entry = {
+            "name": req.name,
+            "base_url": req.base_url,
+            "api_key_env": env_var,
+            "api_key": req.api_key,
+            "models": [{"id": m, "name": m} for m in req.models],
+        }
+        # Save to .env
+        env_file = _get_config_dir() / ".env"
+        env_lines = env_file.read_text(encoding="utf-8").splitlines() if env_file.exists() else []
+        env_lines = [l for l in env_lines if not l.startswith(f"{env_var}=")]
+        env_lines.append(f"{env_var}={req.api_key}")
+        env_file.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
+
+    providers.append(entry)
     config["providers"] = providers
-    # Also save to .env
-    env_file = _get_config_dir() / ".env"
-    env_lines = env_file.read_text(encoding="utf-8").splitlines() if env_file.exists() else []
-    env_lines = [l for l in env_lines if not l.startswith(f"{env_var}=")]
-    env_lines.append(f"{env_var}={req.api_key}")
-    env_file.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
     _save_yaml(config_file, config)
     return {"ok": True, "name": req.name}
 
@@ -168,6 +201,7 @@ async def delete_provider(name: str):
 
 class ProviderUpdateRequest(BaseModel):
     api_key: Optional[str] = None
+    oauth: Optional[OAuthConfig] = None
     models: Optional[List[str]] = None
 
 
@@ -180,6 +214,7 @@ async def update_provider(name: str, req: ProviderUpdateRequest):
     for p in providers:
         if p.get("name") == name:
             found = True
+            # Update API key (api_key mode)
             if req.api_key:
                 p["api_key"] = req.api_key
                 env_var = p.get("api_key_env", name.upper().replace("-", "_") + "_API_KEY")
@@ -188,6 +223,17 @@ async def update_provider(name: str, req: ProviderUpdateRequest):
                 env_lines = [l for l in env_lines if not l.startswith(f"{env_var}=")]
                 env_lines.append(f"{env_var}={req.api_key}")
                 env_file.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
+            # Update OAuth config (oauth mode)
+            if req.oauth:
+                p["auth_type"] = "oauth"
+                existing = p.get("oauth") or {}
+                updated = req.oauth.model_dump(exclude_none=True)
+                # Preserve existing client_secret if placeholder is passed (****) 
+                if updated.get("client_secret", "").endswith("****"):
+                    updated.pop("client_secret", None)
+                existing.update(updated)
+                p["oauth"] = existing
+            # Update models
             if req.models is not None:
                 p["models"] = [{"id": m, "name": m} for m in req.models if m.strip()]
             break

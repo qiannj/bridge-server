@@ -6,6 +6,7 @@ Providers Package - Bridge Server v2.0
 
 from .base import BaseProvider, ModelInfo, ProviderFactory, ProviderStatus, ProviderMetrics
 from .manager import ProviderManager, RoutingStrategy, ProviderConfig
+from .oauth_manager import OAuthTokenManager
 
 # 导入具体Provider实现
 from .dashscope import DashScopeProvider
@@ -24,6 +25,9 @@ __all__ = [
     "ProviderManager",
     "RoutingStrategy", 
     "ProviderConfig",
+
+    # OAuth
+    "OAuthTokenManager",
     
     # 具体实现
     "DashScopeProvider",

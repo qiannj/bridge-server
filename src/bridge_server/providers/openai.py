@@ -15,12 +15,17 @@ class OpenAIProvider(BaseProvider):
     """OpenAI Provider"""
     
     def __init__(self, config: Dict[str, Any]):
-        # Validate API key and immediately remove it from the config dict so it
-        # is never accidentally serialised or exposed via self.config.
-        self.api_key = config.get("api_key") or os.getenv("OPENAI_API_KEY")
-        config.pop("api_key", None)
-        if not self.api_key:
-            raise ValueError("OpenAI API密钥未配置，请设置 OPENAI_API_KEY 环境变量")
+        # OAuth providers don't use a static API key; token is fetched dynamically.
+        if config.get("auth_type") == "oauth":
+            self.api_key = None
+            config.pop("api_key", None)
+        else:
+            # Validate API key and immediately remove it from the config dict so it
+            # is never accidentally serialised or exposed via self.config.
+            self.api_key = config.get("api_key") or os.getenv("OPENAI_API_KEY")
+            config.pop("api_key", None)
+            if not self.api_key:
+                raise ValueError("OpenAI API密钥未配置，请设置 OPENAI_API_KEY 环境变量")
         
         # 设置默认基础URL
         config.setdefault("base_url", "https://api.openai.com/v1")
@@ -29,12 +34,14 @@ class OpenAIProvider(BaseProvider):
         super().__init__(config)
     
     def _get_headers(self) -> Dict[str, str]:
-        """获取OpenAI请求头"""
-        return {
-            "Authorization": f"Bearer {self.api_key}",
+        """获取OpenAI请求头。OAuth 模式下不设置静态 Authorization（由事件钩子动态注入）。"""
+        headers = {
             "Content-Type": "application/json",
-            "User-Agent": "BridgeServer/2.0"
+            "User-Agent": "BridgeServer/2.0",
         }
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
     
     def _load_models(self) -> Dict[str, ModelInfo]:
         """加载OpenAI支持的模型"""
