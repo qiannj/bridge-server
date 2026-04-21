@@ -42,6 +42,14 @@ _PARAM_RE = re.compile(
     r"<parameter\s+name=\"([^\"]+)\"\s*>(.*?)</parameter>",
     re.IGNORECASE | re.DOTALL,
 )
+_TOOL_TAG_RE = re.compile(
+    r"<tool\s+name=\"([^\"]+)\"\s*>(.*?)</tool>",
+    re.IGNORECASE | re.DOTALL,
+)
+_TOOL_TAG_PARAM_RE = re.compile(
+    r"<param\s+name=\"([^\"]+)\"\s*>(.*?)</param>",
+    re.IGNORECASE | re.DOTALL,
+)
 _TOOL_CODE_RE = re.compile(
     r"<tool_code>\s*(.*?)\s*</tool_code>",
     re.IGNORECASE | re.DOTALL,
@@ -295,16 +303,35 @@ class BaseProvider(ABC):
                 continue
 
             invoke_match = _INVOKE_RE.search(inner)
-            if not invoke_match:
+            if invoke_match:
+                name = (invoke_match.group(1) or "").strip()
+                if name:
+                    params = {
+                        param_name.strip(): param_value.strip()
+                        for param_name, param_value in _PARAM_RE.findall(invoke_match.group(2) or "")
+                        if param_name.strip()
+                    }
+                    tool_calls.append({
+                        "id": self._make_tool_call_id(),
+                        "type": "function",
+                        "function": {
+                            "name": name,
+                            "arguments": json.dumps(params, ensure_ascii=False),
+                        },
+                    })
+                    continue
+
+            tool_tag_match = _TOOL_TAG_RE.search(inner)
+            if not tool_tag_match:
                 continue
 
-            name = (invoke_match.group(1) or "").strip()
+            name = (tool_tag_match.group(1) or "").strip()
             if not name:
                 continue
 
             params = {
                 param_name.strip(): param_value.strip()
-                for param_name, param_value in _PARAM_RE.findall(invoke_match.group(2) or "")
+                for param_name, param_value in _TOOL_TAG_PARAM_RE.findall(tool_tag_match.group(2) or "")
                 if param_name.strip()
             }
             tool_calls.append({
