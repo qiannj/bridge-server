@@ -298,6 +298,8 @@ def _enrich_scenario(name: str, cfg: Any) -> Dict:
         "enabled": cfg.get("enabled", True),
         "model": cfg.get("model", ""),
         "patterns": patterns,
+        "exclude_patterns": cfg.get("exclude_patterns", []),
+        "priority": cfg.get("priority", 0),
     }
 
 
@@ -314,6 +316,8 @@ class ScenarioConfig(BaseModel):
     enabled: bool = True
     model: str = ""
     patterns: List[str] = []
+    exclude_patterns: List[str] = []  # Skip this scenario if any of these match
+    priority: int = 0                 # Higher priority wins when multiple scenarios match
 
 
 class RoutingUpdateRequest(BaseModel):
@@ -335,6 +339,8 @@ async def update_routing(req: RoutingUpdateRequest):
                 "enabled": v.enabled,
                 "model": v.model,
                 "patterns": v.patterns,
+                "exclude_patterns": v.exclude_patterns,
+                "priority": v.priority,
             }
             for k, v in req.scenarios.items()
         }
@@ -363,6 +369,9 @@ async def patch_scenario(name: str, req: ScenarioConfig):
     existing["enabled"] = req.enabled
     if req.patterns:  # Only overwrite patterns when explicitly provided
         existing["patterns"] = req.patterns
+    if req.exclude_patterns is not None:
+        existing["exclude_patterns"] = req.exclude_patterns
+    existing["priority"] = req.priority
     scenarios[name] = existing
     config["scenarios"] = scenarios
     _save_yaml(config_file, config)

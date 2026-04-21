@@ -79,25 +79,33 @@ class ScenarioMatcher:
     def __init__(self, scenarios: Dict[str, Any]):
         self._scenarios: Dict[str, Any] = {}
         self._compiled: Dict[str, List[re.Pattern]] = {}
+        self._compiled_exclude: Dict[str, List[re.Pattern]] = {}
         self.load(scenarios)
 
     def load(self, scenarios: Dict[str, Any]):
         """加载场景配置，支持热更新"""
         self._scenarios = {}
         self._compiled = {}
+        self._compiled_exclude = {}
         for name, cfg in scenarios.items():
             if not cfg.get('enabled', True):
                 continue
             patterns = cfg.get('patterns') or DEFAULT_PATTERNS.get(name, [])
+            exclude_patterns = cfg.get('exclude_patterns') or []
             self._scenarios[name] = cfg
             self._compiled[name] = [
                 re.compile(p, re.IGNORECASE) for p in patterns if p
+            ]
+            self._compiled_exclude[name] = [
+                re.compile(p, re.IGNORECASE) for p in exclude_patterns if p
             ]
         logger.info(f"场景匹配器加载完成: {list(self._scenarios.keys())}")
 
     def match(self, message: str) -> Tuple[str, float]:
         """
         对消息进行场景匹配。
+        - exclude_patterns 中任一命中 → 跳过该场景
+        - 多场景同时命中 → priority 高者优先，priority 相同时取得分高者
         Returns (scenario_name, confidence) — 无匹配时返回 ('general', 0.5)
         """
         if not message:
@@ -105,6 +113,10 @@ class ScenarioMatcher:
 
         scores: Dict[str, float] = {}
         for name, patterns in self._compiled.items():
+            # Skip if any exclude pattern matches the message
+            if any(p.search(message) for p in self._compiled_exclude.get(name, [])):
+                logger.debug(f"场景 '{name}' 被排除规则跳过")
+                continue
             score = 0.0
             for pattern in patterns:
                 hits = len(pattern.findall(message))
@@ -116,7 +128,8 @@ class ScenarioMatcher:
         if not scores:
             return 'general', 0.5
 
-        best = max(scores, key=scores.get)
+        # Higher priority wins; break ties by score
+        best = max(scores, key=lambda n: (self._scenarios[n].get('priority', 0), scores[n]))
         if scores[best] < 0.3:
             return 'general', 0.5
 

@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN" x-data="app()" :class="{ dark: dark }" class="h-full">
 <head>
   <meta charset="UTF-8" />
@@ -403,13 +403,20 @@
                       <option :value="m" x-text="m" :selected="m === sc.model"></option>
                     </template>
                   </select>
+                  <!-- Priority -->
+                  <div class="flex items-center gap-1 text-xs text-slate-400 flex-shrink-0">
+                    <span class="hidden sm:inline">优先级</span>
+                    <input type="number" x-model.number="sc.priority" min="0" max="99"
+                      title="优先级：多场景同时命中时，数字大的优先"
+                      class="w-12 px-1.5 py-1 text-xs rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-center focus:ring-1 focus:ring-brand-500" />
+                  </div>
                   <!-- Expand / collapse patterns -->
                   <button
                     @click="sc._expanded = !sc._expanded"
                     :class="sc._expanded ? 'text-brand-600' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-200'"
                     class="text-xs px-2 py-1 rounded font-medium flex items-center gap-1 transition-colors flex-shrink-0"
                   >
-                    <span x-text="(sc.patterns || []).length + ' 条规则'"></span>
+                    <span x-text="(sc.patterns || []).length + ' 规则' + ((sc.exclude_patterns || []).length ? ' / ' + sc.exclude_patterns.length + ' 排除' : '')"></span>
                     <span x-text="sc._expanded ? '▲' : '▼'" class="text-xs"></span>
                   </button>
                   <!-- Delete scenario -->
@@ -435,6 +442,28 @@
                     class="mt-1 text-xs text-brand-600 hover:text-brand-700 font-medium"
                   >+ 添加规则</button>
                   <p class="text-xs text-slate-400 mt-1">每条规则为正则表达式（支持 <code class="bg-slate-100 dark:bg-slate-700 px-1 rounded">|</code> 多选），不区分大小写。匹配任意一条即命中该场景。</p>
+
+                  <!-- Exclude patterns -->
+                  <div class="mt-3 pt-2 border-t border-slate-100 dark:border-slate-700">
+                    <p class="text-xs font-medium text-red-500 dark:text-red-400 mb-1.5">🚫 排除规则 <span class="font-normal text-slate-400">（消息命中则跳过此场景）</span></p>
+                    <template x-for="(pat, idx) in (sc.exclude_patterns || [])" :key="'ex'+idx">
+                      <div class="flex items-center gap-2 mb-1">
+                        <span class="text-xs text-slate-400 w-4 text-right flex-shrink-0" x-text="idx+1"></span>
+                        <input
+                          :value="pat"
+                          @input="if (!sc.exclude_patterns) sc.exclude_patterns = []; sc.exclude_patterns[idx] = $event.target.value"
+                          class="flex-1 px-2.5 py-1 text-xs font-mono rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 focus:ring-1 focus:ring-red-400"
+                          placeholder="排除正则，如: 写.*代码|实现|编写"
+                        />
+                        <button @click="sc.exclude_patterns.splice(idx, 1)" class="text-red-400 hover:text-red-500 text-xs flex-shrink-0 px-1">✕</button>
+                      </div>
+                    </template>
+                    <button
+                      @click="if (!sc.exclude_patterns) sc.exclude_patterns = []; sc.exclude_patterns.push('')"
+                      class="mt-0.5 text-xs text-red-500 hover:text-red-600 font-medium"
+                    >+ 添加排除规则</button>
+                    <p class="text-xs text-slate-400 mt-1.5">示例：架构场景加排除 <code class="bg-slate-100 dark:bg-slate-700 px-1 rounded">写.*代码|实现|编写</code>，则「按照这个架构写代码」会跳过架构场景，路由到代码场景。</p>
+                  </div>
                 </div>
               </div>
             </template>
@@ -1422,7 +1451,7 @@ function app() {
       const key = prompt('场景名称 (如: coding, chat, custom):');
       if (!key || !key.trim()) return;
       if (this.routingScenarios[key.trim()]) { this.showToast('场景已存在', 'error'); return; }
-      this.routingScenarios[key.trim()] = { enabled: true, model: '', patterns: [], _expanded: true };
+      this.routingScenarios[key.trim()] = { enabled: true, model: '', patterns: [], exclude_patterns: [], priority: 0, _expanded: true };
     },
 
     deleteScenario(key) {
