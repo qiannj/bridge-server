@@ -6,14 +6,42 @@ Provider 抽象基类 - Bridge Server v2.0
 
 import asyncio
 import httpx
+import json
 import logging
+import re
 import time
+import uuid
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, AsyncGenerator
 from dataclasses import dataclass
 from enum import Enum
 
 logger = logging.getLogger(__name__)
+
+_OPENAI_EXTRA_PAYLOAD_KEYS = (
+    "tools",
+    "tool_choice",
+    "parallel_tool_calls",
+    "stop",
+    "response_format",
+    "presence_penalty",
+    "frequency_penalty",
+    "seed",
+    "n",
+)
+
+_TAGGED_TOOL_CALL_RE = re.compile(
+    r"<(?:[\w.-]+:)?tool_call>\s*(.*?)\s*</(?:[\w.-]+:)?tool_call>",
+    re.IGNORECASE | re.DOTALL,
+)
+_INVOKE_RE = re.compile(
+    r"<invoke\s+name=\"([^\"]+)\"\s*>(.*?)</invoke>",
+    re.IGNORECASE | re.DOTALL,
+)
+_PARAM_RE = re.compile(
+    r"<parameter\s+name=\"([^\"]+)\"\s*>(.*?)</parameter>",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 class ProviderStatus(Enum):
@@ -136,6 +164,176 @@ class BaseProvider(ABC):
             except Exception as e:
                 logger.error(f"OAuth token 获取失败 | Provider: {self.provider_id} | {e}")
                 raise
+
+    def _format_openai_compatible_messages(self, messages: list) -> list:
+        """Preserve OpenAI-compatible tool metadata instead of flattening to role/content only."""
+        formatted = []
+        for msg in messages:
+            if not isinstance(msg, dict):
+                continue
+            role = msg.get("role")
+            if not role:
+                continue
+
+            entry: Dict[str, Any] = {"role": role}
+            if "content" in msg:
+                entry["content"] = msg.get("content")
+            elif role != "assistant":
+                entry["content"] = None
+
+            for key in ("name", "tool_calls", "tool_call_id"):
+                if key in msg and msg.get(key) is not None:
+                    entry[key] = msg.get(key)
+
+            if role == "assistant" and "content" not in entry and "tool_calls" not in entry:
+                continue
+
+            formatted.append(entry)
+        return formatted
+
+    def _build_openai_compatible_payload(
+        self,
+        *,
+        model: str,
+        messages: list,
+        stream: bool,
+        default_max_tokens: int,
+        default_temperature: float,
+        default_top_p: float,
+        kwargs: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "model": model,
+            "messages": self._format_openai_compatible_messages(messages),
+            "stream": stream,
+            "max_tokens": kwargs.get("max_tokens", default_max_tokens),
+            "temperature": kwargs.get("temperature", default_temperature),
+            "top_p": kwargs.get("top_p", default_top_p),
+        }
+
+        for key in _OPENAI_EXTRA_PAYLOAD_KEYS:
+            if key in kwargs:
+                payload[key] = kwargs.get(key)
+
+        stream_options = kwargs.get("stream_options")
+        if stream and stream_options:
+            payload["stream_options"] = stream_options
+
+        return {k: v for k, v in payload.items() if v is not None}
+
+    @staticmethod
+    def _make_tool_call_id() -> str:
+        return f"call_{uuid.uuid4().hex[:24]}"
+
+    def _extract_tagged_tool_calls(self, content: Any):
+        if not isinstance(content, str) or "tool_call" not in content.lower():
+            return content, []
+
+        tool_calls = []
+        for match in _TAGGED_TOOL_CALL_RE.finditer(content):
+            inner = (match.group(1) or "").strip()
+            if not inner:
+                continue
+
+            parsed = None
+            try:
+                parsed = json.loads(inner)
+            except Exception:
+                parsed = None
+
+            if isinstance(parsed, dict) and parsed.get("name"):
+                arguments = parsed.get("arguments", {})
+                if not isinstance(arguments, dict):
+                    arguments = {}
+                tool_calls.append({
+                    "id": self._make_tool_call_id(),
+                    "type": "function",
+                    "function": {
+                        "name": str(parsed["name"]),
+                        "arguments": json.dumps(arguments, ensure_ascii=False),
+                    },
+                })
+                continue
+
+            invoke_match = _INVOKE_RE.search(inner)
+            if not invoke_match:
+                continue
+
+            name = (invoke_match.group(1) or "").strip()
+            if not name:
+                continue
+
+            params = {
+                param_name.strip(): param_value.strip()
+                for param_name, param_value in _PARAM_RE.findall(invoke_match.group(2) or "")
+                if param_name.strip()
+            }
+            tool_calls.append({
+                "id": self._make_tool_call_id(),
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "arguments": json.dumps(params, ensure_ascii=False),
+                },
+            })
+
+        if not tool_calls:
+            return content, []
+
+        cleaned = _TAGGED_TOOL_CALL_RE.sub("", content).strip()
+        return cleaned or None, tool_calls
+
+    def _normalize_openai_compatible_response(self, result: Dict[str, Any], provider_name: str) -> Dict[str, Any]:
+        normalized = dict(result or {})
+        normalized["provider"] = provider_name
+
+        choices = normalized.get("choices")
+        if not isinstance(choices, list):
+            return normalized
+
+        for choice in choices:
+            if not isinstance(choice, dict):
+                continue
+            message = choice.get("message")
+            if not isinstance(message, dict) or message.get("tool_calls"):
+                continue
+
+            cleaned_content, tool_calls = self._extract_tagged_tool_calls(message.get("content"))
+            if not tool_calls:
+                continue
+
+            message["content"] = cleaned_content
+            message["tool_calls"] = tool_calls
+            if choice.get("finish_reason") in (None, "stop"):
+                choice["finish_reason"] = "tool_calls"
+
+        return normalized
+
+    def _normalize_openai_compatible_stream_chunk(self, chunk: Dict[str, Any], provider_name: str) -> Dict[str, Any]:
+        normalized = dict(chunk or {})
+        normalized["provider"] = provider_name
+
+        choices = normalized.get("choices")
+        if not isinstance(choices, list):
+            return normalized
+
+        for choice in choices:
+            if not isinstance(choice, dict):
+                continue
+            delta = choice.get("delta")
+            if not isinstance(delta, dict) or delta.get("tool_calls"):
+                continue
+
+            cleaned_content, tool_calls = self._extract_tagged_tool_calls(delta.get("content"))
+            if not tool_calls:
+                continue
+
+            delta["content"] = cleaned_content
+            delta["tool_calls"] = tool_calls
+            if choice.get("finish_reason") in (None, "stop"):
+                choice["finish_reason"] = "tool_calls"
+
+        return normalized
     
     @abstractmethod
     def _get_headers(self) -> Dict[str, str]:

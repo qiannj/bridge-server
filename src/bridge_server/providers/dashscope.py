@@ -69,30 +69,21 @@ class DashScopeProvider(BaseProvider):
     
     def _format_messages(self, messages: list) -> list:
         """格式化消息为DashScope格式"""
-        formatted = []
-        for msg in messages:
-            if isinstance(msg, dict) and "role" in msg and "content" in msg:
-                formatted.append({
-                    "role": msg["role"],
-                    "content": msg["content"]
-                })
-        return formatted
+        return self._format_openai_compatible_messages(messages)
     
     async def _make_request(self, messages: list, model: str = None, **kwargs) -> Dict[str, Any]:
         """发起DashScope请求"""
         model = model or "qwen3.5-flash"  # 默认使用性价比高的模型
         
-        payload = {
-            "model": model,
-            "messages": self._format_messages(messages),
-            "stream": False,
-            "max_tokens": kwargs.get("max_tokens", 4000),
-            "temperature": kwargs.get("temperature", 0.7),
-            "top_p": kwargs.get("top_p", 0.8),
-        }
-        
-        # 移除None值
-        payload = {k: v for k, v in payload.items() if v is not None}
+        payload = self._build_openai_compatible_payload(
+            model=model,
+            messages=messages,
+            stream=False,
+            default_max_tokens=4000,
+            default_temperature=0.7,
+            default_top_p=0.8,
+            kwargs=kwargs,
+        )
         
         response = await self.client.post(
             "/chat/completions",
@@ -101,31 +92,21 @@ class DashScopeProvider(BaseProvider):
         response.raise_for_status()
         
         result = response.json()
-        
-        # 标准化响应格式
-        return {
-            "id": result.get("id"),
-            "model": result.get("model"),
-            "choices": result.get("choices", []),
-            "usage": result.get("usage", {}),
-            "provider": "dashscope"
-        }
+        return self._normalize_openai_compatible_response(result, "dashscope")
     
     async def _make_stream_request(self, messages: list, model: str = None, **kwargs) -> AsyncGenerator[str, None]:
         """发起DashScope流式请求"""
         model = model or "qwen3.5-flash"
         
-        payload = {
-            "model": model,
-            "messages": self._format_messages(messages),
-            "stream": True,
-            "max_tokens": kwargs.get("max_tokens", 4000),
-            "temperature": kwargs.get("temperature", 0.7),
-            "top_p": kwargs.get("top_p", 0.8),
-        }
-        
-        # 移除None值
-        payload = {k: v for k, v in payload.items() if v is not None}
+        payload = self._build_openai_compatible_payload(
+            model=model,
+            messages=messages,
+            stream=True,
+            default_max_tokens=4000,
+            default_temperature=0.7,
+            default_top_p=0.8,
+            kwargs=kwargs,
+        )
         
         async with self.client.stream(
             "POST", 
@@ -147,24 +128,8 @@ class DashScopeProvider(BaseProvider):
                     
                     try:
                         chunk = json.loads(data)
-                        
-                        # 提取内容
-                        choices = chunk.get("choices", [])
-                        if choices and len(choices) > 0:
-                            delta = choices[0].get("delta", {})
-                            content = delta.get("content", "")
-                            
-                            if content:
-                                # 返回标准格式
-                                yield json.dumps({
-                                    "id": chunk.get("id"),
-                                    "model": chunk.get("model"),
-                                    "choices": [{
-                                        "delta": {"content": content},
-                                        "index": 0
-                                    }],
-                                    "provider": "dashscope"
-                                })
+                        chunk = self._normalize_openai_compatible_stream_chunk(chunk, "dashscope")
+                        yield json.dumps(chunk, ensure_ascii=False)
                     
                     except json.JSONDecodeError:
                         continue

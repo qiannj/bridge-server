@@ -69,31 +69,21 @@ class MoonshotProvider(BaseProvider):
     
     def _format_messages(self, messages: list) -> list:
         """格式化消息为Moonshot格式"""
-        formatted = []
-        for msg in messages:
-            if isinstance(msg, dict) and "role" in msg and "content" in msg:
-                # Moonshot使用OpenAI兼容格式
-                formatted.append({
-                    "role": msg["role"],
-                    "content": msg["content"]
-                })
-        return formatted
+        return self._format_openai_compatible_messages(messages)
     
     async def _make_request(self, messages: list, model: str = None, **kwargs) -> Dict[str, Any]:
         """发起Moonshot请求"""
         model = model or "moonshot-v1-8k"  # 默认使用8K模型
         
-        payload = {
-            "model": model,
-            "messages": self._format_messages(messages),
-            "stream": False,
-            "max_tokens": kwargs.get("max_tokens", 4000),
-            "temperature": kwargs.get("temperature", 0.3),  # Moonshot推荐较低的temperature
-            "top_p": kwargs.get("top_p", 1.0),
-        }
-        
-        # 移除None值
-        payload = {k: v for k, v in payload.items() if v is not None}
+        payload = self._build_openai_compatible_payload(
+            model=model,
+            messages=messages,
+            stream=False,
+            default_max_tokens=4000,
+            default_temperature=0.3,
+            default_top_p=1.0,
+            kwargs=kwargs,
+        )
         
         response = await self.client.post(
             "/chat/completions",
@@ -102,26 +92,21 @@ class MoonshotProvider(BaseProvider):
         response.raise_for_status()
         
         result = response.json()
-        
-        # 标准化响应格式并添加provider标识
-        result["provider"] = "moonshot"
-        return result
+        return self._normalize_openai_compatible_response(result, "moonshot")
     
     async def _make_stream_request(self, messages: list, model: str = None, **kwargs) -> AsyncGenerator[str, None]:
         """发起Moonshot流式请求"""
         model = model or "moonshot-v1-8k"
         
-        payload = {
-            "model": model,
-            "messages": self._format_messages(messages),
-            "stream": True,
-            "max_tokens": kwargs.get("max_tokens", 4000),
-            "temperature": kwargs.get("temperature", 0.3),
-            "top_p": kwargs.get("top_p", 1.0),
-        }
-        
-        # 移除None值
-        payload = {k: v for k, v in payload.items() if v is not None}
+        payload = self._build_openai_compatible_payload(
+            model=model,
+            messages=messages,
+            stream=True,
+            default_max_tokens=4000,
+            default_temperature=0.3,
+            default_top_p=1.0,
+            kwargs=kwargs,
+        )
         
         async with self.client.stream(
             "POST",
@@ -143,11 +128,8 @@ class MoonshotProvider(BaseProvider):
                     
                     try:
                         chunk = json.loads(data)
-                        
-                        # 添加provider标识
-                        chunk["provider"] = "moonshot"
-                        
-                        yield json.dumps(chunk)
+                        chunk = self._normalize_openai_compatible_stream_chunk(chunk, "moonshot")
+                        yield json.dumps(chunk, ensure_ascii=False)
                     
                     except json.JSONDecodeError:
                         continue
