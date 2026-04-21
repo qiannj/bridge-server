@@ -720,3 +720,129 @@ async def get_logs(n: int = Query(100, le=500)):
         return {"lines": []}
     lines = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
     return {"lines": lines[-n:]}
+
+
+# ── Custom Router Management ──────────────────────────────────────────────────
+
+class RouterImportRequest(BaseModel):
+    path: str  # 本地目录路径或 .bspkg 文件路径
+
+
+class RouterActivateRequest(BaseModel):
+    name: str
+
+
+class RouterTestRequest(BaseModel):
+    name: str
+    message: str = "帮我写一个快速排序算法"
+
+
+def _get_registry():
+    """获取 RouterRegistry 单例（runtime 启动后可用）。"""
+    try:
+        from bridge_server.services.router_registry import get_router_registry
+        reg = get_router_registry()
+        if reg is None:
+            raise HTTPException(status_code=503, detail="RouterRegistry 未初始化")
+        return reg
+    except ImportError:
+        raise HTTPException(status_code=503, detail="RouterRegistry 模块不可用")
+
+
+@router.get("/router/list", dependencies=_deps)
+async def list_routers():
+    """列出所有已安装的自定义路由器。"""
+    reg = _get_registry()
+    return {"routers": reg.list_routers(), "active": reg.get_active()}
+
+
+@router.get("/router/active", dependencies=_deps)
+async def get_active_router():
+    """获取当前激活的路由器名称（null 表示使用内置路由）。"""
+    reg = _get_registry()
+    return {"active": reg.get_active()}
+
+
+@router.post("/router/import", dependencies=_deps)
+async def import_router(req: RouterImportRequest):
+    """从本地路径安装路由器（目录或 .bspkg 文件）。"""
+    reg = _get_registry()
+    src = Path(req.path)
+    if not src.exists():
+        raise HTTPException(status_code=400, detail=f"路径不存在: {req.path}")
+    try:
+        manifest = reg.install(src)
+        return {
+            "ok": True,
+            "name": manifest.name,
+            "version": manifest.version,
+            "description": manifest.description,
+        }
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.put("/router/activate", dependencies=_deps)
+async def activate_router(req: RouterActivateRequest):
+    """激活指定路由器（替换当前激活的路由器）。"""
+    reg = _get_registry()
+    try:
+        reg.activate(req.name)
+        return {"ok": True, "active": req.name}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/router/deactivate", dependencies=_deps)
+async def deactivate_router():
+    """停用自定义路由器，回退到内置 SmartRouter。"""
+    reg = _get_registry()
+    reg.deactivate()
+    return {"ok": True, "active": None}
+
+
+@router.post("/router/rollback/{name}", dependencies=_deps)
+async def rollback_router(name: str):
+    """将指定路由器回滚到上一个版本（需要之前有备份）。"""
+    reg = _get_registry()
+    try:
+        reg.rollback(name)
+        return {"ok": True, "message": f"路由器 '{name}' 已回滚到上一个版本"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/router/{name}", dependencies=_deps)
+async def remove_router(name: str):
+    """卸载指定路由器（不可撤销）。"""
+    reg = _get_registry()
+    try:
+        reg.remove(name)
+        return {"ok": True, "message": f"路由器 '{name}' 已卸载"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/router/test", dependencies=_deps)
+async def test_router(req: RouterTestRequest):
+    """测试路由器：使用指定消息运行路由，返回决策结果和耗时。"""
+    reg = _get_registry()
+    try:
+        from bridge_server.services.model_info import get_model_info_aggregator
+        from bridge_server.router_sdk import RoutingContext
+
+        agg = get_model_info_aggregator()
+        model_list = agg.get_snapshot() if agg else []
+        ctx = RoutingContext(
+            last_user_message=req.message,
+            messages_count=1,
+            models=model_list,
+        )
+        result = await reg.test_router(req.name, ctx)
+        return result
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"路由器 '{req.name}' 未安装")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

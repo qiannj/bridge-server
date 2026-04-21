@@ -1,0 +1,7 @@
+{
+  "name": "simple-cost-router",
+  "version": "1.0.0",
+  "entrypoint": "router.py",
+  "class": "SimpleCostRouter",
+  "description": "按能力门槛选最便宜模型的示例路由器。编码请求优先高编码分模型，其他请求选最便宜的健康模型。"
+}

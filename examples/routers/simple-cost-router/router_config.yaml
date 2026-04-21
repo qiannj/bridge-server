@@ -1,0 +1,6 @@
+# 最小编码路由器配置
+# 路由逻辑：
+#   coding_min_score  — 判定为"编码任务"的 coding 能力最低门槛
+#   max_latency_p99   — 最大可接受 p99 延迟（ms），0 = 不限制
+coding_min_score: 0.7
+max_latency_p99: 5000

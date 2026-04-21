@@ -792,6 +792,143 @@ def cmd_reload():
         print_error(str(e))
 
 
+# ============ 自定义路由器管理 ============
+
+def cmd_router(args):
+    """自定义路由器管理"""
+    sub = args[0].lower() if args else "list"
+
+    if sub == "list":
+        try:
+            resp = _admin_api("GET", "/router/list")
+            resp.raise_for_status()
+            data = resp.json()
+            active = data.get("active")
+            routers = data.get("routers", [])
+            print(f"\n{Colors.BOLD}自定义路由器列表{Colors.ENDC}\n")
+            if not routers:
+                print_info("未安装任何自定义路由器")
+            else:
+                for r in routers:
+                    mark = f"{Colors.GREEN}● 激活{Colors.ENDC}" if r.get("active") else f"{Colors.YELLOW}○ 未激活{Colors.ENDC}"
+                    print(f"  {mark}  {Colors.BOLD}{r['name']}{Colors.ENDC}  v{r.get('version','?')}")
+                    if r.get("description"):
+                        print(f"         {r['description']}")
+            if active:
+                print(f"\n  当前激活: {Colors.GREEN}{active}{Colors.ENDC}")
+            else:
+                print(f"\n  当前使用: {Colors.CYAN}内置 SmartRouter{Colors.ENDC}")
+            print()
+        except Exception as e:
+            print_error(str(e))
+
+    elif sub == "import":
+        if not args[1:]:
+            print_error("用法: bridge-server router import <路径>  (目录或 .bspkg 文件)")
+            sys.exit(1)
+        path = " ".join(args[1:])
+        try:
+            resp = _admin_api("POST", "/router/import", json_data={"path": path})
+            resp.raise_for_status()
+            data = resp.json()
+            print_success(f"路由器 '{data['name']}' v{data['version']} 安装成功")
+            if data.get("description"):
+                print_info(data["description"])
+            print_info(f"激活命令: bridge-server router activate {data['name']}")
+        except Exception as e:
+            resp_data = {}
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    resp_data = e.response.json()
+                except Exception:
+                    pass
+            print_error(resp_data.get("detail") or str(e))
+
+    elif sub == "activate":
+        if not args[1:]:
+            print_error("用法: bridge-server router activate <路由器名>")
+            sys.exit(1)
+        name = args[1]
+        try:
+            resp = _admin_api("PUT", "/router/activate", json_data={"name": name})
+            resp.raise_for_status()
+            print_success(f"路由器 '{name}' 已激活，后续请求将使用自定义路由")
+        except Exception as e:
+            print_error(str(e))
+
+    elif sub == "deactivate":
+        try:
+            resp = _admin_api("POST", "/router/deactivate")
+            resp.raise_for_status()
+            print_success("自定义路由器已停用，回退到内置 SmartRouter")
+        except Exception as e:
+            print_error(str(e))
+
+    elif sub == "rollback":
+        name = args[1] if args[1:] else None
+        if not name:
+            # rollback active router
+            try:
+                resp = _admin_api("GET", "/router/active")
+                name = resp.json().get("active")
+            except Exception:
+                pass
+        if not name:
+            print_error("用法: bridge-server router rollback <路由器名>")
+            sys.exit(1)
+        try:
+            resp = _admin_api("POST", f"/router/rollback/{name}")
+            resp.raise_for_status()
+            print_success(resp.json().get("message", f"'{name}' 已回滚"))
+        except Exception as e:
+            print_error(str(e))
+
+    elif sub == "remove":
+        if not args[1:]:
+            print_error("用法: bridge-server router remove <路由器名>")
+            sys.exit(1)
+        name = args[1]
+        try:
+            resp = _admin_api("DELETE", f"/router/{name}")
+            resp.raise_for_status()
+            print_success(f"路由器 '{name}' 已卸载")
+        except Exception as e:
+            print_error(str(e))
+
+    elif sub == "test":
+        name = args[1] if args[1:] else None
+        if not name:
+            # test active router
+            try:
+                resp = _admin_api("GET", "/router/active")
+                name = resp.json().get("active")
+            except Exception:
+                pass
+        if not name:
+            print_error("用法: bridge-server router test <路由器名> [消息]")
+            sys.exit(1)
+        message = " ".join(args[2:]) if args[2:] else "帮我写一个快速排序算法"
+        try:
+            resp = _admin_api("POST", "/router/test", json_data={"name": name, "message": message})
+            resp.raise_for_status()
+            result = resp.json()
+            if result.get("success"):
+                d = result["decision"]
+                print_success(f"路由成功  ({result['elapsed_ms']}ms)")
+                print(f"  Provider: {Colors.BOLD}{d['provider']}{Colors.ENDC}")
+                print(f"  Model:    {Colors.CYAN}{d['model']}{Colors.ENDC}")
+                print(f"  置信度:   {d['confidence']:.2f}")
+                print(f"  原因:     {d['reason']}")
+            else:
+                print_error(f"路由失败: {result.get('error')}")
+        except Exception as e:
+            print_error(str(e))
+
+    else:
+        print_error(f"未知 router 子命令: {sub}")
+        print("  可用子命令: list, import, activate, deactivate, rollback, remove, test")
+
+
 def print_help():
     """显示帮助"""
     help_text = f"""
@@ -833,6 +970,15 @@ def print_help():
     benchmark       模型能力基准测试
     panel-token     显示/生成管理面板 Token（--reset 重新生成）
 
+  自定义路由器（需要 Panel Token）:
+    router list                       列出所有已安装路由器
+    router import <路径>               安装路由器（目录或 .bspkg 文件）
+    router activate <名称>             激活指定路由器
+    router deactivate                  停用，回退到内置 SmartRouter
+    router rollback [名称]             回滚到上一个版本
+    router remove <名称>               卸载路由器
+    router test [名称] [消息]          测试路由器路由决策
+
   其他:
     help            显示帮助
 
@@ -845,6 +991,10 @@ def print_help():
   bridge-server panel-token
   bridge-server logs 100
   bridge-server route-test "用 Python 写个快速排序"
+  bridge-server router import ./my-router
+  bridge-server router activate my-router
+  bridge-server router test my-router "写个快速排序"
+  bridge-server router deactivate
 """
     print(help_text)
 
@@ -931,6 +1081,8 @@ def main():
             cmd_scenario_set(sys.argv[3], sys.argv[4])
         else:
             print_error(f"未知 scenario 子命令: {sub}  (可用: list, set)")
+    elif command == "router":
+        cmd_router(sys.argv[2:])
     elif command == "login":
         username = sys.argv[2] if len(sys.argv) > 2 else "admin"
         password = sys.argv[3] if len(sys.argv) > 3 else ""

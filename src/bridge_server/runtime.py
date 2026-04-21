@@ -55,6 +55,9 @@ from .observability import (
 )
 from .services.routing import SmartRouter
 from .services.savings import estimate_baseline_cost_rmb, estimate_model_cost_usd, resolve_baseline_model
+from .services.model_info import ModelInfoAggregator, set_model_info_aggregator, get_model_info_aggregator
+from .services.router_registry import RouterRegistry, set_router_registry, get_router_registry
+from .router_sdk import RoutingContext, RoutingDecision
 from .utils.cache import HybridCache
 from .utils.connection_pools import close_connection_pool_manager, get_connection_pool_manager
 
@@ -75,6 +78,8 @@ cache_system: Optional[HybridCache] = None
 usage_tracker: Optional[UsageTrackerAsync] = None
 auth_manager: Optional[AsyncAuthManager] = None
 runtime_config: Dict[str, Any] = {}
+model_info_aggregator: Optional[ModelInfoAggregator] = None
+router_registry_instance: Optional[RouterRegistry] = None
 
 
 def _resolve_config_dir() -> Path:
@@ -243,7 +248,7 @@ async def load_config_async() -> Dict[str, Any]:
 
 async def initialize_system():
     """初始化系统组件"""
-    global provider_manager, smart_router, cache_system, usage_tracker, auth_manager, connection_pool_manager, runtime_config
+    global provider_manager, smart_router, cache_system, usage_tracker, auth_manager, connection_pool_manager, runtime_config, model_info_aggregator, router_registry_instance
     
     logger.info("🚀 Bridge Server v2.0 系统初始化...")
     runtime_config = await load_config_async()
@@ -305,6 +310,22 @@ async def initialize_system():
         logger.info(f"健康检查完成: {healthy_count}/{len(health_results)} 个Provider健康")
     
     logger.info("✅ 系统初始化完成")
+
+    # 7. 初始化自定义路由框架
+    logger.info("初始化自定义路由框架...")
+    config_dir = _resolve_config_dir()
+    model_info_aggregator = ModelInfoAggregator(config_dir=config_dir)
+    set_model_info_aggregator(model_info_aggregator)
+    await model_info_aggregator.start()
+
+    router_registry_instance = RouterRegistry(routers_dir=config_dir / "routers")
+    set_router_registry(router_registry_instance)
+
+    active = router_registry_instance.get_active()
+    if active:
+        logger.info(f"自定义路由器 '{active}' 已加载")
+    else:
+        logger.info("无激活的自定义路由器，使用内置 SmartRouter")
 
 
 # FastAPI应用
@@ -442,6 +463,9 @@ async def shutdown_event():
         usage_cleanup = usage_tracker.close()
         if inspect.isawaitable(usage_cleanup):
             cleanup_tasks.append(usage_cleanup)
+
+    if model_info_aggregator:
+        cleanup_tasks.append(model_info_aggregator.stop())
     
     if cleanup_tasks:
         await asyncio.gather(*cleanup_tasks, return_exceptions=True)
@@ -702,16 +726,63 @@ async def chat_completions(
         
         if not smart_router or not provider_manager:
             raise HTTPException(status_code=500, detail="系统组件未初始化")
-        
-        route_result = await smart_router.route(
-            messages=messages,
-            user_context={
-                **user_context,
-                "user_id": current_user.get("user_id"),
-                "user_domain": current_user.get("domain", "general"),
-            },
-            provider_manager=provider_manager
-        )
+
+        # 优先使用自定义路由器（如果已激活）
+        route_result = None
+        _registry = get_router_registry()
+        _active_router = _registry.get_active() if _registry else None
+
+        if _active_router and _registry:
+            _aggregator = get_model_info_aggregator()
+            _model_list = _aggregator.get_snapshot() if _aggregator else []
+            _ctx = RoutingContext(
+                last_user_message=next(
+                    (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
+                    "",
+                ),
+                messages_count=len(messages),
+                models=_model_list,
+                session_metadata={
+                    "user_id": current_user.get("user_id"),
+                    "user_domain": current_user.get("domain", "general"),
+                },
+            )
+            _ok, _result = await _registry.execute(_active_router, _ctx)
+            if _ok and isinstance(_result, RoutingDecision):
+                from .services.routing.router import RouteResult  # local import to avoid circular
+                route_result = RouteResult(
+                    provider_id=_result.provider,
+                    model=_result.model,
+                    task_type="custom",
+                    confidence=_result.confidence,
+                    reason=_result.reason,
+                    from_cache=False,
+                )
+                logger.info(
+                    "custom_router_selected",
+                    router=_active_router,
+                    provider=_result.provider,
+                    model=_result.model,
+                    confidence=round(_result.confidence, 3),
+                    reason=_result.reason,
+                )
+            else:
+                logger.warning(
+                    "custom_router_fallback",
+                    router=_active_router,
+                    error=str(_result),
+                )
+
+        if route_result is None:
+            route_result = await smart_router.route(
+                messages=messages,
+                user_context={
+                    **user_context,
+                    "user_id": current_user.get("user_id"),
+                    "user_domain": current_user.get("domain", "general"),
+                },
+                provider_manager=provider_manager
+            )
         
         route_time = (time.perf_counter() - perf_route_start) * 1000
         bind_llm_context(provider_id=route_result.provider_id, model=route_result.model)
