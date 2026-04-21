@@ -42,6 +42,22 @@ _PARAM_RE = re.compile(
     r"<parameter\s+name=\"([^\"]+)\"\s*>(.*?)</parameter>",
     re.IGNORECASE | re.DOTALL,
 )
+_TOOL_CODE_RE = re.compile(
+    r"<tool_code>\s*(.*?)\s*</tool_code>",
+    re.IGNORECASE | re.DOTALL,
+)
+_TOOL_CODE_NAME_RE = re.compile(
+    r"tool\s*=>\s*['\"]([^'\"]+)['\"]",
+    re.IGNORECASE,
+)
+_TOOL_CODE_ARGS_RE = re.compile(
+    r"args\s*=>\s*['\"](.*?)['\"]",
+    re.IGNORECASE | re.DOTALL,
+)
+_SIMPLE_XML_ARG_RE = re.compile(
+    r"<([a-zA-Z0-9_:-]+)>\s*(.*?)\s*</\1>",
+    re.DOTALL,
+)
 
 
 class ProviderStatus(Enum):
@@ -225,8 +241,31 @@ class BaseProvider(ABC):
     def _make_tool_call_id() -> str:
         return f"call_{uuid.uuid4().hex[:24]}"
 
+    @staticmethod
+    def _extract_tool_code_arguments(raw_args: str) -> Dict[str, Any]:
+        xml_matches = _SIMPLE_XML_ARG_RE.findall(raw_args or "")
+        if xml_matches:
+            return {name.strip(): value.strip() for name, value in xml_matches if name.strip()}
+
+        stripped = (raw_args or "").strip()
+        if not stripped:
+            return {}
+
+        try:
+            parsed = json.loads(stripped)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+
+        return {"input": stripped}
+
     def _extract_tagged_tool_calls(self, content: Any):
-        if not isinstance(content, str) or "tool_call" not in content.lower():
+        if not isinstance(content, str):
+            return content, []
+
+        lowered = content.lower()
+        if "tool_call" not in lowered and "tool_code" not in lowered:
             return content, []
 
         tool_calls = []
@@ -277,10 +316,35 @@ class BaseProvider(ABC):
                 },
             })
 
+        for match in _TOOL_CODE_RE.finditer(content):
+            inner = (match.group(1) or "").strip()
+            if not inner:
+                continue
+
+            name_match = _TOOL_CODE_NAME_RE.search(inner)
+            if not name_match:
+                continue
+            name = name_match.group(1).strip()
+            if not name:
+                continue
+
+            args_match = _TOOL_CODE_ARGS_RE.search(inner)
+            arguments = self._extract_tool_code_arguments(args_match.group(1) if args_match else "")
+            tool_calls.append({
+                "id": self._make_tool_call_id(),
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "arguments": json.dumps(arguments, ensure_ascii=False),
+                },
+            })
+
         if not tool_calls:
             return content, []
 
-        cleaned = _TAGGED_TOOL_CALL_RE.sub("", content).strip()
+        cleaned = _TAGGED_TOOL_CALL_RE.sub("", content)
+        cleaned = _TOOL_CODE_RE.sub("", cleaned)
+        cleaned = cleaned.strip()
         return cleaned or None, tool_calls
 
     def _normalize_openai_compatible_response(self, result: Dict[str, Any], provider_name: str) -> Dict[str, Any]:

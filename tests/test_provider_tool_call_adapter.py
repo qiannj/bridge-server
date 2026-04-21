@@ -123,3 +123,38 @@ async def test_openai_provider_converts_tagged_tool_call_content_to_openai_tool_
     assert message["content"] == "我先看下之前的账本格式和 [current.md](current.md) 在哪儿，找到了再更新。"
     assert message["tool_calls"][0]["function"]["name"] == "exec"
     assert message["tool_calls"][0]["function"]["arguments"] == '{"command": "find . -name current.md"}'
+
+
+@pytest.mark.asyncio
+async def test_openai_provider_converts_tool_code_blocks_to_openai_tool_calls():
+    provider = OpenAIProvider({"id": "openai", "api_key": "***", "base_url": "https://example.com"})
+
+    async def _fake_post(path, json):
+        return _FakeResponse({
+            "id": "resp_3",
+            "model": "minimax-m2.7",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "我来帮你排查项目文档 `current.md`。按照你的要求，我需要逐步进行：\n\n**步骤 1：搜索文件位置**\n<tool_code>\n{\n  tool => 'workspace_search_files',\n  args => '\n<query>current.md</query>\n'\n}\n</tool_code>",
+                },
+                "finish_reason": "stop",
+            }],
+            "usage": {},
+        })
+
+    provider.client = SimpleNamespace(post=_fake_post)
+
+    response = await provider._make_request(
+        messages=[{"role": "user", "content": "排查 current.md"}],
+        model="gpt-4",
+    )
+
+    choice = response["choices"][0]
+    message = choice["message"]
+
+    assert choice["finish_reason"] == "tool_calls"
+    assert message["content"] == "我来帮你排查项目文档 `current.md`。按照你的要求，我需要逐步进行：\n\n**步骤 1：搜索文件位置**"
+    assert message["tool_calls"][0]["function"]["name"] == "workspace_search_files"
+    assert message["tool_calls"][0]["function"]["arguments"] == '{"query": "current.md"}'
