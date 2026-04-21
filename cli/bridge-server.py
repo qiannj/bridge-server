@@ -693,10 +693,109 @@ def cmd_benchmark():
     subprocess.run([sys.executable, str(benchmark_script)] + sys.argv[2:])
 
 
+# ============ 管理 API 鉴权辅助 ============
+
+def _get_panel_token() -> str:
+    """从 auth.yaml 读取 Panel Token"""
+    auth_file = Path.home() / ".bridge-server" / "auth.yaml"
+    if auth_file.exists():
+        with open(auth_file, encoding="utf-8") as f:
+            auth = yaml.safe_load(f) or {}
+        return auth.get("panel_token", "")
+    return ""
+
+
+def _admin_api(method: str, path: str, json_data=None):
+    """携带鉴权调用管理 API"""
+    token = _get_panel_token()
+    if not token:
+        raise RuntimeError("未找到 Panel Token，请先运行: bridge-server panel-token")
+    server_url = get_server_url()
+    headers = {"X-Panel-Token": token}
+    resp = httpx.request(
+        method, f"{server_url}/api/admin{path}",
+        headers=headers, json=json_data, timeout=5
+    )
+    if resp.status_code == 401:
+        raise RuntimeError("Panel Token 无效，请运行: bridge-server panel-token --reset")
+    return resp
+
+
+def cmd_model_list():
+    """列出所有 Provider 及其模型"""
+    try:
+        resp = _admin_api("GET", "/config")
+        resp.raise_for_status()
+        data = resp.json()
+        providers = data.get("providers", [])
+        print(f"\n{Colors.BOLD}Provider 模型列表{Colors.ENDC}\n")
+        if not providers:
+            print_info("暂无 Provider 配置")
+            return
+        for p in providers:
+            auth_type = p.get("auth_type", "api_key")
+            print(f"  {Colors.BOLD}{p['name']}{Colors.ENDC}  ({auth_type})  {Colors.CYAN}{p.get('base_url', '')}{Colors.ENDC}")
+            for m in p.get("models", []):
+                mid = m.get("id", m) if isinstance(m, dict) else str(m)
+                ic = m.get("input_cost", 0) if isinstance(m, dict) else 0
+                oc = m.get("output_cost", 0) if isinstance(m, dict) else 0
+                cost_str = f"  {Colors.YELLOW}输入¥{ic:.4f}/K  输出¥{oc:.4f}/K{Colors.ENDC}" if (ic or oc) else ""
+                print(f"      {mid}{cost_str}")
+        print()
+    except Exception as e:
+        print_error(str(e))
+
+
+def cmd_scenario_list():
+    """列出所有场景路由配置"""
+    try:
+        resp = _admin_api("GET", "/routing")
+        resp.raise_for_status()
+        data = resp.json()
+        strategy = data.get("strategy", "fallback")
+        scenarios = data.get("scenarios", {})
+        print(f"\n{Colors.BOLD}场景路由配置{Colors.ENDC}  策略: {Colors.CYAN}{strategy}{Colors.ENDC}\n")
+        if not scenarios:
+            print_info("暂无场景配置")
+            return
+        for name, cfg in scenarios.items():
+            enabled = cfg.get("enabled", True)
+            model = cfg.get("model") or f"{Colors.YELLOW}(未设置){Colors.ENDC}"
+            mark = f"{Colors.GREEN}✓{Colors.ENDC}" if enabled else f"{Colors.RED}✗{Colors.ENDC}"
+            print(f"  {mark}  {Colors.BOLD}{name:<20}{Colors.ENDC}  →  {model}")
+        print()
+    except Exception as e:
+        print_error(str(e))
+
+
+def cmd_scenario_set(name: str, model_str: str):
+    """设置某个场景使用的模型 (provider/model-id)"""
+    try:
+        resp = _admin_api("PATCH", f"/routing/scenarios/{name}",
+                          json_data={"model": model_str, "enabled": True, "patterns": []})
+        resp.raise_for_status()
+        print_success(f"场景 '{name}' 已更新 → {model_str}")
+        print_info("路由已热重载，无需重启服务")
+    except Exception as e:
+        print_error(str(e))
+
+
+def cmd_reload():
+    """热重载服务器配置（无需重启）"""
+    try:
+        resp = _admin_api("POST", "/reload")
+        resp.raise_for_status()
+        data = resp.json()
+        reloaded = data.get("reloaded", [])
+        print_success(f"配置已热重载: {', '.join(reloaded) if reloaded else '路由'}")
+    except Exception as e:
+        print_error(str(e))
+
+
 def print_help():
     """显示帮助"""
     help_text = f"""
-{Colors.BOLD}Bridge Server CLI v1.6.0{Colors.ENDC}
+{Colors.BOLD}Bridge Server CLI v1.7.0{Colors.ENDC}
 
 {Colors.CYAN}用法:{Colors.ENDC}
   bridge-server <command> [options]
@@ -708,40 +807,44 @@ def print_help():
     stop            停止服务
     restart         重启服务
     logs [n]        查看日志（默认 50 条）
-    health          健康检查（v1.6.0 新增）
+    health          健康检查
+    reload          热重载配置（无需重启）
+
+  模型 & 场景管理（需要 Panel Token）:
+    model list      列出所有 Provider 及模型
+    scenario list   列出所有场景路由配置
+    scenario set <scene> <provider/model>  设置场景模型并热重载
 
   用量统计:
-    usage           查看用量统计
-    usage-records   查看用量记录（v1.6.0 新增）
+    usage           查看用量统计（--week / --month）
+    usage-records   查看原始用量记录
 
   路由管理:
     test            测试连接
     route-test      测试路由
-    routing         查看路由策略（v1.6.0 新增）
-    routing-test    测试路由决策（v1.6.0 新增）
-    providers       列出 Provider（v1.6.0 新增）
-
-  认证管理:
-    login           登录获取 JWT Token（v1.6.0 新增）
+    routing         查看路由策略
+    routing-test    测试路由决策
+    providers       列出 Provider（旧版）
 
   配置管理:
     backup          备份配置
     restore         恢复配置
     setup           运行配置向导
     benchmark       模型能力基准测试
-    panel-token     生成或显示管理面板 Token（--reset 重新生成）
+    panel-token     显示/生成管理面板 Token（--reset 重新生成）
 
   其他:
     help            显示帮助
 
 {Colors.CYAN}示例:{Colors.ENDC}
   bridge-server status
+  bridge-server model list
+  bridge-server scenario list
+  bridge-server scenario set coding my-provider/gpt-4o-mini
+  bridge-server reload
+  bridge-server panel-token
   bridge-server logs 100
-  bridge-server usage --week
   bridge-server route-test "用 Python 写个快速排序"
-  bridge-server routing
-  bridge-server providers
-  bridge-server login
 """
     print(help_text)
 
@@ -809,6 +912,25 @@ def main():
         cmd_providers_list()
     elif command == "health":
         cmd_health()
+    elif command == "reload":
+        cmd_reload()
+    elif command == "model":
+        sub = sys.argv[2].lower() if len(sys.argv) > 2 else "list"
+        if sub == "list":
+            cmd_model_list()
+        else:
+            print_error(f"未知 model 子命令: {sub}  (可用: list)")
+    elif command == "scenario":
+        sub = sys.argv[2].lower() if len(sys.argv) > 2 else "list"
+        if sub == "list":
+            cmd_scenario_list()
+        elif sub == "set":
+            if len(sys.argv) < 5:
+                print_error("用法: bridge-server scenario set <场景名> <provider/model>")
+                sys.exit(1)
+            cmd_scenario_set(sys.argv[3], sys.argv[4])
+        else:
+            print_error(f"未知 scenario 子命令: {sub}  (可用: list, set)")
     elif command == "login":
         username = sys.argv[2] if len(sys.argv) > 2 else "admin"
         password = sys.argv[3] if len(sys.argv) > 3 else ""

@@ -349,16 +349,66 @@ async def update_routing(req: RoutingUpdateRequest):
     return {"ok": True}
 
 
+@router.patch("/routing/scenarios/{name}", dependencies=_deps)
+async def patch_scenario(name: str, req: ScenarioConfig):
+    """Update a single scenario's model/enabled state without touching others."""
+    config_file = _get_config_dir() / "config.yaml"
+    config = _load_yaml(config_file)
+    scenarios = config.setdefault("scenarios", {})
+    existing = scenarios.get(name, {})
+    if not isinstance(existing, dict):
+        existing = {"model": str(existing)}
+    if req.model:
+        existing["model"] = req.model
+    existing["enabled"] = req.enabled
+    if req.patterns:  # Only overwrite patterns when explicitly provided
+        existing["patterns"] = req.patterns
+    scenarios[name] = existing
+    config["scenarios"] = scenarios
+    _save_yaml(config_file, config)
+    try:
+        from bridge_server import runtime as _rt
+        if _rt.smart_router is not None:
+            _rt.smart_router.reload(config.get("scenarios", {}))
+    except Exception:
+        pass
+    return {"ok": True, "name": name}
+
+
+@router.post("/reload", dependencies=_deps)
+async def reload_config():
+    """Hot-reload config.yaml into the running server without restarting."""
+    config = _load_yaml(_get_config_dir() / "config.yaml")
+    reloaded = []
+    try:
+        from bridge_server import runtime as _rt
+        if _rt.smart_router is not None:
+            _rt.smart_router.reload(config.get("scenarios", {}))
+            reloaded.append("router")
+    except Exception:
+        pass
+    return {"ok": True, "reloaded": reloaded}
+
+
 # ── Usage ─────────────────────────────────────────────────────────────────────
 
-def _query_usage(days: int = 1) -> Dict[str, Any]:
+def _query_usage(period: str = "today") -> Dict[str, Any]:
     db_path = _get_config_dir() / "usage.db"
     if not db_path.exists():
         return {"records": [], "summary": {}}
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     try:
-        since = time.time() - days * 86400
+        now = datetime.now()
+        if period == "today":
+            # Start from midnight of today — not rolling 24h window
+            since = now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        elif period == "week":
+            since = time.time() - 7 * 86400
+        elif period == "month":
+            since = time.time() - 30 * 86400
+        else:
+            since = now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
         rows = conn.execute(
             "SELECT * FROM usage_records WHERE timestamp >= ? ORDER BY timestamp DESC LIMIT 500",
             (since,)
@@ -387,8 +437,7 @@ def _query_usage(days: int = 1) -> Dict[str, Any]:
 
 @router.get("/usage", dependencies=_deps)
 async def get_usage(period: str = Query("today")):
-    days = {"today": 1, "week": 7, "month": 30}.get(period, 1)
-    return _query_usage(days)
+    return _query_usage(period)
 
 
 # ── Savings ───────────────────────────────────────────────────────────────────
