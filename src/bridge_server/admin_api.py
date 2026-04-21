@@ -507,6 +507,57 @@ async def update_savings_config(req: SavingsConfigUpdateRequest):
     return {"ok": True, "config": normalized}
 
 
+@router.get("/savings/overview", dependencies=_deps)
+async def get_savings_overview():
+    """老板视角：核心 KPI + 30 天趋势图数据。"""
+    data_30d = _query_savings(30)
+    data_7d  = _query_savings(7)
+    data_1d  = _query_savings(1)
+
+    config = _load_yaml(_get_config_dir() / "config.yaml")
+    savings_cfg = _normalize_savings_config(config.get("savings"))
+
+    # 30-day trend array for chart
+    trend: List[Dict[str, Any]] = []
+    for date_str in sorted(data_30d["daily"].keys()):
+        b = data_30d["daily"][date_str]
+        trend.append({
+            "date": date_str,
+            "savings_rmb":      round(float(b.get("savings_rmb", 0)), 4),
+            "actual_cost_rmb":  round(float(b.get("actual_cost_rmb", 0)), 4),
+            "baseline_cost_rmb": round(float(b.get("baseline_cost_rmb", 0)), 4),
+            "requests":         int(b.get("requests", 0)),
+        })
+
+    # Top model by savings
+    by_model = data_30d.get("by_model") or {}
+    top_model = max(by_model, key=lambda k: by_model[k].get("savings_rmb", 0), default=None) if by_model else None
+
+    def _kpis(s: Dict) -> Dict:
+        return {
+            "savings_rmb":      round(float(s.get("savings_rmb", 0)), 4),
+            "actual_cost_rmb":  round(float(s.get("actual_cost_rmb", 0)), 4),
+            "baseline_cost_rmb": round(float(s.get("baseline_cost_rmb", 0)), 4),
+            "savings_rate":     round(float(s.get("savings_rate", 0)), 4),
+            "total_requests":   int(s.get("total_requests", 0)),
+            "covered_requests": int(s.get("covered_requests", 0)),
+        }
+
+    return {
+        "savings_enabled": savings_cfg["enabled"],
+        "baseline_model":  savings_cfg["baseline"]["default_model"],
+        "kpis": {
+            "today": _kpis(data_1d["summary"]),
+            "week":  _kpis(data_7d["summary"]),
+            "month": _kpis(data_30d["summary"]),
+        },
+        "trend_30d":       trend,
+        "top_saving_model": top_model,
+        "by_task_type_30d": data_30d.get("by_task_type") or {},
+        "by_model_30d":     by_model,
+    }
+
+
 # ── Updates ───────────────────────────────────────────────────────────────────
 
 @router.get("/updates", dependencies=_deps)

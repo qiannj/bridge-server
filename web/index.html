@@ -427,6 +427,163 @@
         </div>
       </div>
 
+      <!-- ── SAVINGS ── -->
+      <div x-show="page === 'savings'" x-cloak>
+
+        <!-- Period + config toggle row -->
+        <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <div class="flex gap-2">
+            <template x-for="p in [{v:'today',l:'今天'},{v:'week',l:'本周'},{v:'month',l:'本月'}]" :key="p.v">
+              <button
+                @click="savingsPeriod = p.v; loadSavings(); $nextTick(() => renderSavingsChart())"
+                :class="savingsPeriod === p.v ? 'bg-brand-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700'"
+                class="px-4 py-1.5 text-sm font-medium rounded-lg transition-colors"
+                x-text="p.l"
+              ></button>
+            </template>
+          </div>
+          <span
+            :class="savingsOverview?.savings_enabled ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-700 text-slate-500'"
+            class="text-xs font-semibold px-3 py-1.5 rounded-full"
+            x-text="savingsOverview?.savings_enabled ? '✅ 节省追踪已启用' : '⏸ 节省追踪未启用'"
+          ></span>
+        </div>
+
+        <!-- KPI cards -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <div class="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700 shadow-sm">
+            <p class="text-xs text-slate-500 uppercase tracking-wide mb-1">累计节省</p>
+            <p class="text-2xl font-bold text-emerald-600">
+              ¥<span x-text="(savingsOverview?.kpis?.[savingsPeriod]?.savings_rmb || 0).toFixed(4)"></span>
+            </p>
+            <p class="text-xs text-slate-400 mt-1" x-text="savingsPeriod === 'today' ? '今天' : savingsPeriod === 'week' ? '最近 7 天' : '最近 30 天'"></p>
+          </div>
+          <div class="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700 shadow-sm">
+            <p class="text-xs text-slate-500 uppercase tracking-wide mb-1">节省率</p>
+            <p class="text-2xl font-bold text-brand-600">
+              <span x-text="((savingsOverview?.kpis?.[savingsPeriod]?.savings_rate || 0) * 100).toFixed(1)"></span>%
+            </p>
+            <p class="text-xs text-slate-400 mt-1">相对基准模型</p>
+          </div>
+          <div class="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700 shadow-sm">
+            <p class="text-xs text-slate-500 uppercase tracking-wide mb-1">实际成本</p>
+            <p class="text-2xl font-bold text-amber-500">
+              ¥<span x-text="(savingsOverview?.kpis?.[savingsPeriod]?.actual_cost_rmb || 0).toFixed(4)"></span>
+            </p>
+            <p class="text-xs text-slate-400 mt-1">
+              基准: ¥<span x-text="(savingsOverview?.kpis?.[savingsPeriod]?.baseline_cost_rmb || 0).toFixed(4)"></span>
+            </p>
+          </div>
+          <div class="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700 shadow-sm">
+            <p class="text-xs text-slate-500 uppercase tracking-wide mb-1">覆盖请求</p>
+            <p class="text-2xl font-bold text-indigo-500">
+              <span x-text="savingsOverview?.kpis?.[savingsPeriod]?.covered_requests || 0"></span>
+              <span class="text-sm font-normal text-slate-400"> / <span x-text="savingsOverview?.kpis?.[savingsPeriod]?.total_requests || 0"></span></span>
+            </p>
+            <p class="text-xs text-slate-400 mt-1" x-text="'最优模型: ' + (savingsOverview?.top_saving_model || '—')"></p>
+          </div>
+        </div>
+
+        <!-- Trend chart + by-task breakdown -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+          <div class="lg:col-span-2 bg-white dark:bg-slate-800 rounded-xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm">
+            <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-3">30 天节省趋势</h3>
+            <div style="height:200px"><canvas id="savingsChart"></canvas></div>
+          </div>
+
+          <!-- By task type -->
+          <div class="bg-white dark:bg-slate-800 rounded-xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm">
+            <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-3">按场景节省</h3>
+            <div class="space-y-2">
+              <template x-for="(v, k) in (savingsOverview?.by_task_type_30d || {})" :key="k">
+                <div>
+                  <div class="flex justify-between text-xs mb-0.5">
+                    <span class="text-slate-600 dark:text-slate-300 font-medium" x-text="k"></span>
+                    <span class="text-emerald-600 font-semibold" x-text="'¥' + (v.savings_rmb || 0).toFixed(4)"></span>
+                  </div>
+                  <div class="h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                    <div class="h-full bg-emerald-500 rounded-full transition-all"
+                      :style="'width:' + Math.min(100, ((v.savings_rmb||0) / Math.max(...Object.values(savingsOverview.by_task_type_30d).map(x=>x.savings_rmb||0), 0.001)) * 100) + '%'">
+                    </div>
+                  </div>
+                </div>
+              </template>
+              <div x-show="!Object.keys(savingsOverview?.by_task_type_30d || {}).length" class="text-xs text-slate-400 italic">暂无数据</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- By model table + Config card -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <!-- By model -->
+          <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+            <div class="px-5 py-3 border-b border-slate-100 dark:border-slate-700">
+              <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300">按模型节省 (30天)</h3>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-xs">
+                <thead class="bg-slate-50 dark:bg-slate-900/50">
+                  <tr>
+                    <th class="px-4 py-2.5 text-left text-slate-500 font-medium">模型</th>
+                    <th class="px-4 py-2.5 text-right text-slate-500 font-medium">请求数</th>
+                    <th class="px-4 py-2.5 text-right text-slate-500 font-medium">实际成本</th>
+                    <th class="px-4 py-2.5 text-right text-slate-500 font-medium">节省额</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
+                  <template x-for="(v, k) in (savingsOverview?.by_model_30d || {})" :key="k">
+                    <tr class="hover:bg-slate-50 dark:hover:bg-slate-700/30">
+                      <td class="px-4 py-2.5 font-mono text-slate-700 dark:text-slate-300 max-w-[150px] truncate" x-text="k"></td>
+                      <td class="px-4 py-2.5 text-right text-slate-500" x-text="v.requests || 0"></td>
+                      <td class="px-4 py-2.5 text-right text-amber-600" x-text="'¥' + (v.actual_cost_rmb || 0).toFixed(4)"></td>
+                      <td class="px-4 py-2.5 text-right font-semibold text-emerald-600" x-text="'¥' + (v.savings_rmb || 0).toFixed(4)"></td>
+                    </tr>
+                  </template>
+                  <tr x-show="!Object.keys(savingsOverview?.by_model_30d || {}).length">
+                    <td colspan="4" class="px-4 py-6 text-center text-slate-400 italic text-xs">暂无数据</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Savings config -->
+          <div class="bg-white dark:bg-slate-800 rounded-xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm">
+            <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-4">节省追踪配置</h3>
+            <div class="space-y-4">
+              <!-- Enable toggle -->
+              <div class="flex items-center justify-between">
+                <span class="text-sm text-slate-600 dark:text-slate-300">启用节省追踪</span>
+                <button
+                  @click="savingsConfig && (savingsConfig.enabled = !savingsConfig.enabled)"
+                  :class="savingsConfig?.enabled ? 'bg-brand-500' : 'bg-slate-300 dark:bg-slate-600'"
+                  class="relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors duration-200 focus:outline-none"
+                >
+                  <span :class="savingsConfig?.enabled ? 'translate-x-5' : 'translate-x-0'" class="inline-block h-6 w-6 transform rounded-full bg-white shadow transition duration-200"></span>
+                </button>
+              </div>
+              <!-- Baseline model -->
+              <div>
+                <label class="block text-xs text-slate-500 mb-1">基准模型 (provider/model)</label>
+                <select x-model="savingsConfig.baseline.default_model"
+                  class="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 focus:ring-1 focus:ring-brand-500">
+                  <option value="">— 不设置 —</option>
+                  <template x-for="m in allModels" :key="m">
+                    <option :value="m" x-text="m"></option>
+                  </template>
+                </select>
+                <p class="text-xs text-slate-400 mt-1">节省额 = 基准模型估算成本 − 实际成本</p>
+              </div>
+              <button
+                @click="saveSavingsConfig()"
+                :disabled="loading || !savingsConfig"
+                class="w-full bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-semibold py-2 rounded-lg transition-colors"
+              >保存配置</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- ── USAGE ── -->
       <div x-show="page === 'usage'" x-cloak>
         <!-- Period selector -->
@@ -764,6 +921,7 @@
 <!-- ═══════════════════ ALPINE.JS APP ═══════════════════ -->
 <script>
 let _usageChart = null;
+let _savingsChart = null;
 
 function app() {
   return {
@@ -778,6 +936,7 @@ function app() {
       { id: 'providers', label: 'Providers', icon: '🔌' },
       { id: 'routing', label: '路由配置', icon: '🔀' },
       { id: 'usage', label: '用量统计', icon: '📈' },
+      { id: 'savings', label: '降本看板', icon: '💰' },
       { id: 'logs', label: '日志', icon: '📋' },
       { id: 'system', label: '系统 / 更新', icon: '⚙️' },
     ],
@@ -788,6 +947,10 @@ function app() {
     config: null,
     usage: null,
     usagePeriod: 'today',
+    savings: null,
+    savingsOverview: null,
+    savingsPeriod: 'week',
+    savingsConfig: null,
     updates: null,
     logs: [],
     logLines: '100',
@@ -870,6 +1033,7 @@ function app() {
       else if (p === 'providers') await Promise.all([this.loadConfig(), this.loadStatus()]);
       else if (p === 'routing') await Promise.all([this.loadConfig(), this.loadRouting()]);
       else if (p === 'usage') { await this.loadUsage(); this.$nextTick(() => this.renderChart()); }
+      else if (p === 'savings') { await Promise.all([this.loadSavingsOverview(), this.loadSavings(), this.loadSavingsConfig()]); this.$nextTick(() => this.renderSavingsChart()); }
       else if (p === 'logs') await this.loadLogs();
       else if (p === 'system') await Promise.all([this.loadConfig(), this.loadUpdates()]);
     },
@@ -880,6 +1044,7 @@ function app() {
       if (this.page === 'logs') await this.loadLogs();
       if (this.page === 'system') await this.loadUpdates();
       if (this.page === 'usage') this.$nextTick(() => this.renderChart());
+      if (this.page === 'savings') { await Promise.all([this.loadSavingsOverview(), this.loadSavings(), this.loadSavingsConfig()]); this.$nextTick(() => this.renderSavingsChart()); }
     },
 
     async api(path, opts = {}) {
@@ -1129,8 +1294,102 @@ function app() {
       return Math.round(((bm[model]?.requests || 0) / max) * 100);
     },
 
-    renderChart() {
-      const canvas = document.getElementById('usageChart');
+    async loadSavingsOverview() {
+      try {
+        const res = await this.api('/api/admin/savings/overview');
+        if (res.ok) this.savingsOverview = await res.json();
+      } catch (e) { console.warn('loadSavingsOverview:', e); }
+    },
+
+    async loadSavings() {
+      try {
+        const res = await this.api(`/api/admin/savings?period=${this.savingsPeriod}`);
+        if (res.ok) this.savings = await res.json();
+      } catch (e) { console.warn('loadSavings:', e); }
+    },
+
+    async loadSavingsConfig() {
+      try {
+        const res = await this.api('/api/admin/savings/config');
+        if (res.ok) {
+          this.savingsConfig = await res.json();
+          if (!this.savingsConfig.baseline) this.savingsConfig.baseline = { default_model: '', scenarios: {} };
+        }
+      } catch (e) { console.warn('loadSavingsConfig:', e); }
+    },
+
+    async saveSavingsConfig() {
+      if (!this.savingsConfig) return;
+      this.loading = true;
+      try {
+        const res = await this.api('/api/admin/savings/config', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.savingsConfig),
+        });
+        if (res.ok) {
+          this.showToast('节省配置已保存！');
+          await this.loadSavingsOverview();
+        } else {
+          const err = await res.json().catch(() => ({}));
+          this.showToast(err.detail || '保存失败', 'error');
+        }
+      } catch (e) {
+        this.showToast('保存失败: ' + e.message, 'error');
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    renderSavingsChart() {
+      const canvas = document.getElementById('savingsChart');
+      if (!canvas) return;
+      if (_savingsChart) { _savingsChart.destroy(); _savingsChart = null; }
+      const trend = this.savingsOverview?.trend_30d || [];
+      const isDark = this.dark;
+      const gridColor = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
+      const tickColor = isDark ? '#94a3b8' : '#64748b';
+      _savingsChart = new Chart(canvas, {
+        type: 'bar',
+        data: {
+          labels: trend.length ? trend.map(d => d.date.slice(5)) : ['暂无数据'],
+          datasets: [
+            {
+              label: '节省额 (¥)',
+              data: trend.length ? trend.map(d => d.savings_rmb) : [0],
+              backgroundColor: 'rgba(16,185,129,0.7)',
+              borderRadius: 3,
+              yAxisID: 'y',
+            },
+            {
+              label: '实际成本 (¥)',
+              data: trend.length ? trend.map(d => d.actual_cost_rmb) : [0],
+              type: 'line',
+              borderColor: '#f59e0b',
+              backgroundColor: 'transparent',
+              tension: 0.3,
+              pointRadius: 3,
+              borderWidth: 2,
+              yAxisID: 'y',
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { labels: { color: tickColor, font: { size: 11 } } },
+            tooltip: { callbacks: { label: ctx => ' ¥' + ctx.parsed.y.toFixed(4) } },
+          },
+          scales: {
+            x: { grid: { color: gridColor }, ticks: { color: tickColor, font: { size: 10 } } },
+            y: { grid: { color: gridColor }, ticks: { color: tickColor, font: { size: 10 } } },
+          },
+        },
+      });
+    },
+
+    renderChart() {      const canvas = document.getElementById('usageChart');
       if (!canvas) return;
 
       if (_usageChart) { _usageChart.destroy(); _usageChart = null; }
