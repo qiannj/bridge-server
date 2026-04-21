@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-04-16 13:39:39",
+  "timestamp": "2026-04-21 19:04:34",
   "progress": {
     "stage1": {
       "completion": 1.0,
@@ -11,6 +11,20 @@
       "files": "10/10",
       "size": 151669
     },
+    "stage3_benchmark": {
+      "completion": 0.5,
+      "description": "模型能力基准测试功能",
+      "done": [
+        "后端 benchmark API (admin_api.py): 题库、评分、异步任务、4个端点",
+        "前端 JS 状态变量和函数 (index.html)",
+        "模型管理界面: 🧪测试按钮、5维度星级、综合分展示"
+      ],
+      "pending": [
+        "前端邀约弹窗 HTML (showBenchmarkOffer modal)",
+        "前端进度/结果弹窗 HTML (showBenchmarkModal modal)",
+        "CLI setup-wizard.py 集成 benchmark 邀约逻辑"
+      ]
+    },
     "total": {
       "completion": 1.0,
       "files": "24/24",
@@ -19,5 +33,5 @@
     }
   },
   "version": "v2.0",
-  "stage": "阶段2实施完成"
+  "stage": "阶段3进行中 — benchmark功能开发"
 }

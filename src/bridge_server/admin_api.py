@@ -3,16 +3,17 @@
 
 import json
 import os
+import re as _re
 import secrets
 import sqlite3
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 import yaml
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -846,3 +847,357 @@ async def test_router(req: RouterTestRequest):
         raise HTTPException(status_code=404, detail=f"路由器 '{req.name}' 未安装")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Benchmark ─────────────────────────────────────────────────────────────────
+
+_BENCHMARK_QUESTIONS: Dict[str, List[Dict]] = {
+    "coding": [
+        {
+            "id": "code_1",
+            "prompt": "用Python实现一个二分查找函数，要求：函数签名为 binary_search(arr, target)，包含详细注释，并给出时间复杂度。",
+            "check": lambda r: bool(_re.search(r"def binary_search", r) and ("O(" in r or "时间复杂度" in r)),
+        },
+        {
+            "id": "code_2",
+            "prompt": "写一段JavaScript代码，使用Promise实现一个带超时控制的fetch请求（超时3秒自动拒绝），并加注释。",
+            "check": lambda r: bool(_re.search(r"Promise|fetch|timeout|setTimeout", r, _re.I)),
+        },
+        {
+            "id": "code_3",
+            "prompt": "请找出以下Python代码中的bug并修复：\n```python\ndef find_max(lst):\n    max_val = lst[0]\n    for i in range(len(lst)):\n        if lst[i] > max_val:\n            max_val = lst[i+1]\n    return max_val\n```",
+            "check": lambda r: bool(_re.search(r"lst\[i\]|索引越界|index|bug|修复|错误", r, _re.I)),
+        },
+    ],
+    "math": [
+        {
+            "id": "math_1",
+            "prompt": "一列火车从A城出发，速度60km/h，同时另一列火车从B城出发，速度90km/h，两城相距600km，两车相向而行，请问几小时后相遇？给出完整解题过程。",
+            "check": lambda r: bool(_re.search(r"4\s*小时|4h|4\s*hour", r, _re.I) or "4" in r),
+        },
+        {
+            "id": "math_2",
+            "prompt": "已知等差数列首项a₁=2，公差d=3，求第15项和前15项之和，请给出推导步骤。",
+            "check": lambda r: bool(_re.search(r"44", r) and _re.search(r"345", r)),
+        },
+        {
+            "id": "math_3",
+            "prompt": "用数学归纳法证明：对所有正整数n，1+2+3+...+n = n(n+1)/2",
+            "check": lambda r: bool(_re.search(r"归纳|induction|k\+1|假设|成立", r, _re.I)),
+        },
+    ],
+    "writing": [
+        {
+            "id": "write_1",
+            "prompt": "以「第一场雪」为题，写一段200字左右的散文，要求意境优美，有具体的场景描写。",
+            "check": lambda r: len(r) >= 100,
+        },
+        {
+            "id": "write_2",
+            "prompt": "帮我写一封给领导申请居家办公的邮件，原因是家中有老人生病需要照料，语气正式但不失人情味，不超过150字。",
+            "check": lambda r: bool(_re.search(r"申请|敬请|居家|审批|办公|领导|尊敬", r)),
+        },
+        {
+            "id": "write_3",
+            "prompt": "为一款主打「极简主义」风格的蓝牙耳机写一段产品介绍文案（80字以内），突出设计感和音质。",
+            "check": lambda r: 20 <= len(r) <= 300,
+        },
+    ],
+    "translation": [
+        {
+            "id": "trans_1",
+            "prompt": '将以下古文翻译成现代英文：\n"知之者不如好之者，好之者不如乐之者。"（出自《论语》）\n请同时给出字面意思和引申义。',
+            "check": lambda r: bool(_re.search(r"know|learn|enjoy|love|delight|pleasure", r, _re.I)),
+        },
+        {
+            "id": "trans_2",
+            "prompt": '将以下英文段落翻译成流畅的中文：\n"Artificial intelligence is transforming every industry, from healthcare to finance, creating both unprecedented opportunities and significant challenges for society."',
+            "check": lambda r: bool(_re.search(r"人工智能|医疗|金融|机遇|挑战", r)),
+        },
+        {
+            "id": "trans_3",
+            "prompt": "请将以下句子分别翻译成日语和法语：\n「春天来了，万物复苏。」",
+            "check": lambda r: bool(_re.search(r"春|printemps|春が|haru", r, _re.I)),
+        },
+    ],
+    "chat": [
+        {
+            "id": "chat_1",
+            "prompt": "我最近工作压力很大，经常失眠，有什么实用的放松建议？",
+            "check": lambda r: len(r) >= 80 and bool(_re.search(r"放松|呼吸|运动|睡眠|休息|建议", r)),
+        },
+        {
+            "id": "chat_2",
+            "prompt": "如果你是一种天气，你会是什么天气？为什么？（请给出有趣且有深度的回答）",
+            "check": lambda r: len(r) >= 50,
+        },
+        {
+            "id": "chat_3",
+            "prompt": "我朋友说「人生苦短，及时行乐」，我觉得这句话有点问题，你怎么看？",
+            "check": lambda r: bool(_re.search(r"但|然而|不过|另一方面|平衡|责任|意义|价值", r)),
+        },
+    ],
+}
+
+_BENCHMARK_DIMENSION_NAMES: Dict[str, str] = {
+    "coding":      "💻 代码编程",
+    "math":        "🔢 数学推理",
+    "writing":     "✍️ 文学创作",
+    "translation": "🌐 语言翻译",
+    "chat":        "💬 日常对话",
+}
+
+_BENCHMARK_QUESTIONS_PER_DIM = 3
+_BENCHMARK_TOKENS_PER_CALL = 750
+_BENCHMARK_SECS_PER_CALL = 6  # conservative estimate
+
+# In-memory task store: task_id -> task_state_dict
+_benchmark_tasks: Dict[str, Dict[str, Any]] = {}
+
+
+def _benchmark_stars(score: int) -> str:
+    s = round(score / 20)
+    return "★" * s + "☆" * (5 - s)
+
+
+def _score_benchmark_response(content: str, latency: float, check_fn, error: str) -> Dict[str, Any]:
+    if error:
+        return {"score": 0, "quality": False, "latency": latency, "error": error}
+    quality = bool(check_fn(content))
+    q_score = 40 if quality else 0
+    length = len(content)
+    l_score = min(30, int(length / 500 * 30)) if length >= 20 else 0
+    speed = max(0, 30 - int((latency - 5) / 85 * 30)) if latency > 5 else 30
+    return {
+        "score": q_score + l_score + speed,
+        "quality": quality,
+        "latency": round(latency, 1),
+        "length": length,
+        "error": "",
+    }
+
+
+async def _call_benchmark_model(
+    base_url: str, api_key: str, model_id: str, prompt: str, timeout: int = 60
+) -> Tuple[str, float, str]:
+    """Async model call for benchmark. Returns (content, latency_sec, error)."""
+    url = base_url.rstrip("/")
+    if not url.endswith("/chat/completions"):
+        url += "/chat/completions"
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    payload = {
+        "model": model_id,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 1000,
+        "temperature": 0.7,
+    }
+    t0 = time.perf_counter()
+    try:
+        async with httpx.AsyncClient(timeout=timeout, verify=False) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+        latency = time.perf_counter() - t0
+        resp.raise_for_status()
+        data = resp.json()
+        msg = data["choices"][0]["message"]
+        content = msg.get("content") or msg.get("reasoning_content") or ""
+        return content.strip(), latency, ""
+    except httpx.TimeoutException:
+        return "", time.perf_counter() - t0, f"超时（>{timeout}s）"
+    except Exception as e:
+        return "", time.perf_counter() - t0, str(e)[:120]
+
+
+async def _run_benchmark_task(
+    task_id: str,
+    models: List[Tuple[str, str, str, str]],  # (provider_name, model_id, base_url, api_key)
+    dimensions: List[str],
+) -> None:
+    """Background task: run benchmark and update _benchmark_tasks[task_id] in-place."""
+    task = _benchmark_tasks[task_id]
+    task["status"] = "running"
+    total_calls = len(models) * len(dimensions) * _BENCHMARK_QUESTIONS_PER_DIM
+    done = 0
+    results: Dict[str, Any] = {}
+
+    try:
+        for provider_name, model_id, base_url, api_key in models:
+            model_key = f"{provider_name}/{model_id}"
+            results[model_key] = {}
+
+            for dim in dimensions:
+                questions = _BENCHMARK_QUESTIONS[dim][:_BENCHMARK_QUESTIONS_PER_DIM]
+                dim_scores = []
+
+                for q in questions:
+                    task["current_step"] = (
+                        f"{model_key}  ·  {_BENCHMARK_DIMENSION_NAMES.get(dim, dim)}  ·  {q['id']}"
+                    )
+                    content, latency, error = await _call_benchmark_model(
+                        base_url, api_key, model_id, q["prompt"]
+                    )
+                    score_info = _score_benchmark_response(content, latency, q["check"], error)
+                    dim_scores.append(score_info)
+                    done += 1
+                    task["progress"] = int(done / total_calls * 100)
+
+                avg_score = (
+                    int(sum(r["score"] for r in dim_scores) / len(dim_scores))
+                    if dim_scores else 0
+                )
+                avg_latency = (
+                    round(sum(r["latency"] for r in dim_scores) / len(dim_scores), 1)
+                    if dim_scores else 0.0
+                )
+                quality_rate = (
+                    round(sum(1 for r in dim_scores if r["quality"]) / len(dim_scores), 2)
+                    if dim_scores else 0.0
+                )
+                results[model_key][dim] = {
+                    "score": avg_score,
+                    "stars": _benchmark_stars(avg_score),
+                    "quality_rate": quality_rate,
+                    "avg_latency": avg_latency,
+                }
+
+        # Persist results (merge with existing file so previous models are kept)
+        out_file = _get_config_dir() / "benchmark_results.yaml"
+        existing: dict = {}
+        if out_file.exists():
+            with open(out_file, encoding="utf-8") as f:
+                existing = yaml.safe_load(f) or {}
+        existing.setdefault("results", {}).update(results)
+        existing["generated_at"] = datetime.now().isoformat()
+        existing["dimensions"] = dimensions
+        with open(out_file, "w", encoding="utf-8") as f:
+            yaml.dump(existing, f, allow_unicode=True, default_flow_style=False)
+
+        task["status"] = "done"
+        task["results"] = results
+        task["progress"] = 100
+        task["current_step"] = "测试完成"
+
+    except Exception as e:
+        task["status"] = "error"
+        task["error"] = str(e)
+        task["current_step"] = ""
+
+
+class BenchmarkStartRequest(BaseModel):
+    provider_name: str
+    model_ids: Optional[List[str]] = None   # None = all models in provider
+    dimensions: Optional[List[str]] = None  # None = all dimensions
+
+
+@router.get("/benchmark/info", dependencies=_deps)
+async def get_benchmark_info():
+    """Return benchmark dimension descriptions and estimation constants."""
+    return {
+        "dimensions": _BENCHMARK_DIMENSION_NAMES,
+        "questions_per_dim": _BENCHMARK_QUESTIONS_PER_DIM,
+        "tokens_per_call": _BENCHMARK_TOKENS_PER_CALL,
+        "secs_per_call": _BENCHMARK_SECS_PER_CALL,
+    }
+
+
+@router.post("/benchmark/start", dependencies=_deps)
+async def start_benchmark(req: BenchmarkStartRequest, background_tasks: BackgroundTasks):
+    """Start an async benchmark task for one provider's models."""
+    config = _load_yaml(_get_config_dir() / "config.yaml")
+    provider = next(
+        (p for p in config.get("providers", []) if p.get("name") == req.provider_name),
+        None,
+    )
+    if not provider:
+        raise HTTPException(status_code=404, detail=f"Provider '{req.provider_name}' 不存在")
+
+    base_url = provider.get("base_url", "")
+    auth_type = provider.get("auth_type", "api_key")
+
+    # Resolve API key / bearer token
+    if auth_type == "oauth":
+        api_key = ""
+        try:
+            from bridge_server.providers.oauth_manager import OAuthManager
+            mgr = OAuthManager(provider.get("oauth", {}))
+            api_key = await mgr.get_token()
+        except Exception:
+            pass
+    else:
+        env_var = provider.get("api_key_env", "")
+        env_file = _get_config_dir() / ".env"
+        if env_file.exists():
+            for line in env_file.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    os.environ.setdefault(k.strip(), v.strip())
+        api_key = os.environ.get(env_var, "") or provider.get("api_key", "")
+
+    if not api_key:
+        raise HTTPException(status_code=422, detail="无法获取 API Key，请检查配置")
+
+    # Resolve model list
+    all_model_ids = [
+        (m.get("id") if isinstance(m, dict) else str(m))
+        for m in provider.get("models", [])
+    ]
+    model_ids = req.model_ids if req.model_ids else all_model_ids
+    model_ids = [m for m in model_ids if m in all_model_ids]
+    if not model_ids:
+        raise HTTPException(status_code=422, detail="没有有效的模型 ID")
+
+    dimensions = req.dimensions if req.dimensions else list(_BENCHMARK_QUESTIONS.keys())
+    dimensions = [d for d in dimensions if d in _BENCHMARK_QUESTIONS]
+    if not dimensions:
+        raise HTTPException(status_code=422, detail="没有有效的测试维度")
+
+    total_calls = len(model_ids) * len(dimensions) * _BENCHMARK_QUESTIONS_PER_DIM
+    est_tokens = total_calls * _BENCHMARK_TOKENS_PER_CALL
+    est_minutes = round(total_calls * _BENCHMARK_SECS_PER_CALL / 60, 1)
+
+    task_id = secrets.token_hex(8)
+    _benchmark_tasks[task_id] = {
+        "status": "pending",
+        "progress": 0,
+        "current_step": "等待启动…",
+        "results": None,
+        "error": None,
+        "provider_name": req.provider_name,
+        "model_ids": model_ids,
+        "dimensions": dimensions,
+        "total_calls": total_calls,
+    }
+
+    models_tuples = [
+        (req.provider_name, mid, base_url, api_key) for mid in model_ids
+    ]
+    background_tasks.add_task(_run_benchmark_task, task_id, models_tuples, dimensions)
+
+    return {
+        "task_id": task_id,
+        "estimated_calls": total_calls,
+        "estimated_tokens": est_tokens,
+        "estimated_minutes": est_minutes,
+        "model_ids": model_ids,
+        "dimensions": dimensions,
+    }
+
+
+@router.get("/benchmark/status/{task_id}", dependencies=_deps)
+async def get_benchmark_status(task_id: str):
+    """Poll the status of a running benchmark task."""
+    task = _benchmark_tasks.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task 不存在或已过期")
+    return task
+
+
+@router.get("/benchmark/results", dependencies=_deps)
+async def get_benchmark_results():
+    """Return the last saved benchmark results file."""
+    out_file = _get_config_dir() / "benchmark_results.yaml"
+    if not out_file.exists():
+        return {"results": {}, "generated_at": None, "dimensions": []}
+    with open(out_file, encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    return data

@@ -299,6 +299,10 @@
                   </td>
                   <td class="px-4 py-3 text-right">
                     <button
+                      @click="promptBenchmark(p.name, (p.models||[]).map(m => typeof m === 'string' ? m : m.id))"
+                      class="text-xs text-purple-500 hover:text-purple-700 dark:hover:text-purple-300 font-medium transition-colors px-2 py-1 rounded hover:bg-purple-50 dark:hover:bg-purple-900/30 mr-1"
+                    >🧪 测试</button>
+                    <button
                       @click="startEdit(p)"
                       class="text-xs text-brand-500 hover:text-brand-700 dark:hover:text-brand-300 font-medium transition-colors px-2 py-1 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 mr-1"
                     >编辑</button>
@@ -332,6 +336,13 @@
                         <th class="text-left pb-1 font-medium">模型 ID</th>
                         <th class="text-right pb-1 font-medium">输入 ¥/1K</th>
                         <th class="text-right pb-1 font-medium">输出 ¥/1K</th>
+                        <th class="text-center pb-1 font-medium">💻</th>
+                        <th class="text-center pb-1 font-medium">🔢</th>
+                        <th class="text-center pb-1 font-medium">✍️</th>
+                        <th class="text-center pb-1 font-medium">🌐</th>
+                        <th class="text-center pb-1 font-medium">💬</th>
+                        <th class="text-center pb-1 font-medium">综合</th>
+                        <th class="text-right pb-1 font-medium"></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -339,11 +350,40 @@
                         <tr class="border-b border-slate-50 dark:border-slate-700/50 last:border-0">
                           <td class="py-1 pr-4 font-mono text-slate-700 dark:text-slate-300" x-text="m.id || m"></td>
                           <td class="py-1 pr-2 text-right text-slate-500 dark:text-slate-400" x-text="m.input_cost ? '¥' + Number(m.input_cost).toFixed(4) : '—'"></td>
-                          <td class="py-1 text-right text-slate-500 dark:text-slate-400" x-text="m.output_cost ? '¥' + Number(m.output_cost).toFixed(4) : '—'"></td>
+                          <td class="py-1 pr-2 text-right text-slate-500 dark:text-slate-400" x-text="m.output_cost ? '¥' + Number(m.output_cost).toFixed(4) : '—'"></td>
+                          <template x-for="dim in benchmarkDimKeys()" :key="dim">
+                            <td class="py-1 text-center">
+                              <span
+                                :class="getBenchmarkScore(p.name, m.id||m, dim) ? 'text-amber-500' : 'text-slate-300 dark:text-slate-600'"
+                                class="font-mono text-xs"
+                                x-text="getBenchmarkScore(p.name, m.id||m, dim)?.stars || '·····'"
+                              ></span>
+                            </td>
+                          </template>
+                          <td class="py-1 text-center">
+                            <span
+                              x-show="getModelOverallScore(p.name, m.id||m) !== null"
+                              :class="getModelOverallScore(p.name, m.id||m) >= 70 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : getModelOverallScore(p.name, m.id||m) >= 50 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'"
+                              class="inline-block px-1.5 py-0.5 rounded text-xs font-bold"
+                              x-text="getModelOverallScore(p.name, m.id||m)"
+                            ></span>
+                            <span x-show="getModelOverallScore(p.name, m.id||m) === null" class="text-slate-300 dark:text-slate-600">—</span>
+                          </td>
+                          <td class="py-1 text-right">
+                            <button
+                              @click="promptBenchmark(p.name, [m.id||m])"
+                              class="text-purple-400 hover:text-purple-600 dark:hover:text-purple-300 font-medium transition-colors px-1 py-0.5 rounded hover:bg-purple-50 dark:hover:bg-purple-900/30"
+                              title="测试此模型能力"
+                            >🧪</button>
+                          </td>
                         </tr>
                       </template>
                     </tbody>
                   </table>
+                  <p x-show="benchmarkSavedResults && Object.keys(benchmarkSavedResults.results||{}).length > 0"
+                     class="mt-2 text-xs text-slate-400">
+                    📊 能力分 0–100，上次测试：<span x-text="benchmarkSavedResults?.generated_at ? new Date(benchmarkSavedResults.generated_at).toLocaleString('zh-CN') : '—'"></span>
+                  </p>
                 </div>
               </div>
             </details>
@@ -1123,6 +1163,14 @@ function app() {
     showEditProvider: false,
     editTarget: '',
     editProvider: { api_key: '', auth_type: 'api_key', oauth_token_url: '', oauth_client_id: '', oauth_client_secret: '', oauth_scope: '', modelList: [] },
+    // Benchmark state
+    showBenchmarkOffer: false,
+    benchmarkOfferData: { providerName: '', modelIds: [], calls: 0, tokens: 0, minutes: 0 },
+    showBenchmarkModal: false,
+    benchmarkTaskId: null,
+    benchmarkStatus: null,
+    benchmarkSavedResults: null,
+    _benchmarkPollTimer: null,
 
     async init() {
       // Apply dark mode class
@@ -1184,7 +1232,7 @@ function app() {
     async navigate(p) {
       this.page = p;
       if (p === 'dashboard') await Promise.all([this.loadStatus(), this.loadUsage()]);
-      else if (p === 'providers') await Promise.all([this.loadConfig(), this.loadStatus()]);
+      else if (p === 'providers') await Promise.all([this.loadConfig(), this.loadStatus(), this.loadBenchmarkResults()]);
       else if (p === 'routing') await Promise.all([this.loadConfig(), this.loadRouting()]);
       else if (p === 'usage') { await this.loadUsage(); this.$nextTick(() => this.renderChart()); }
       else if (p === 'savings') { await Promise.all([this.loadSavingsOverview(), this.loadSavings(), this.loadSavingsConfig()]); this.$nextTick(() => this.renderSavingsChart()); }
@@ -1318,10 +1366,14 @@ function app() {
           body: JSON.stringify(body),
         });
         if (res.ok) {
+          const addedName = this.newProvider.name;
+          const addedModelIds = models.map(r => r.id.trim());
           this.showAddProvider = false;
           this.newProvider = { name: '', base_url: '', api_key: '', auth_type: 'api_key', oauth_token_url: '', oauth_client_id: '', oauth_client_secret: '', oauth_scope: '', modelList: [{id: '', input_cost: 0, output_cost: 0}] };
           await this.loadConfig();
           this.showToast('Provider 添加成功！');
+          // Offer benchmark after a short delay so the toast is visible
+          setTimeout(() => this.promptBenchmark(addedName, addedModelIds), 600);
         } else {
           const err = await res.json().catch(() => ({}));
           this.showToast(err.detail || '添加失败', 'error');
@@ -1464,6 +1516,100 @@ function app() {
       this.toast = msg;
       this.toastType = type;
       setTimeout(() => { this.toast = ''; }, 3500);
+    },
+
+    // ── Benchmark ──────────────────────────────────────────────────────────
+
+    promptBenchmark(providerName, modelIds) {
+      const dims = 5;
+      const calls = modelIds.length * dims * 3;
+      const tokens = calls * 750;
+      const minutes = Math.ceil(calls * 6 / 60);
+      this.benchmarkOfferData = { providerName, modelIds, calls, tokens, minutes };
+      this.showBenchmarkOffer = true;
+    },
+
+    async startBenchmark() {
+      this.showBenchmarkOffer = false;
+      this.showBenchmarkModal = true;
+      this.benchmarkStatus = { status: 'pending', progress: 0, current_step: '正在启动…', results: null, error: null };
+      try {
+        const res = await this.api('/api/admin/benchmark/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            provider_name: this.benchmarkOfferData.providerName,
+            model_ids: this.benchmarkOfferData.modelIds,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          this.benchmarkTaskId = data.task_id;
+          this._pollBenchmark();
+        } else {
+          const err = await res.json().catch(() => ({}));
+          this.benchmarkStatus = { status: 'error', progress: 0, current_step: '', error: err.detail || '启动失败' };
+        }
+      } catch (e) {
+        this.benchmarkStatus = { status: 'error', progress: 0, current_step: '', error: e.message };
+      }
+    },
+
+    _pollBenchmark() {
+      if (!this.benchmarkTaskId) return;
+      const poll = async () => {
+        try {
+          const res = await this.api('/api/admin/benchmark/status/' + this.benchmarkTaskId);
+          if (res.ok) {
+            this.benchmarkStatus = await res.json();
+            if (this.benchmarkStatus.status === 'done') {
+              await this.loadBenchmarkResults();
+              return;
+            }
+            if (this.benchmarkStatus.status === 'error') return;
+          }
+        } catch (e) { /* ignore poll errors */ }
+        this._benchmarkPollTimer = setTimeout(poll, 2000);
+      };
+      this._benchmarkPollTimer = setTimeout(poll, 1500);
+    },
+
+    closeBenchmarkModal() {
+      if (this._benchmarkPollTimer) clearTimeout(this._benchmarkPollTimer);
+      this._benchmarkPollTimer = null;
+      this.showBenchmarkModal = false;
+      this.benchmarkTaskId = null;
+      this.benchmarkStatus = null;
+    },
+
+    async loadBenchmarkResults() {
+      try {
+        const res = await this.api('/api/admin/benchmark/results');
+        if (res.ok) this.benchmarkSavedResults = await res.json();
+      } catch (e) { console.warn('loadBenchmarkResults:', e); }
+    },
+
+    getBenchmarkScore(providerName, modelId, dim) {
+      const key = providerName + '/' + modelId;
+      return this.benchmarkSavedResults?.results?.[key]?.[dim] || null;
+    },
+
+    getModelOverallScore(providerName, modelId) {
+      const key = providerName + '/' + modelId;
+      const modelResults = this.benchmarkSavedResults?.results?.[key];
+      if (!modelResults) return null;
+      const scores = Object.values(modelResults).map(d => d.score || 0);
+      if (!scores.length) return null;
+      return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+    },
+
+    benchmarkDimKeys() {
+      return ['coding', 'math', 'writing', 'translation', 'chat'];
+    },
+
+    benchmarkDimLabel(dim) {
+      const labels = { coding: '💻 代码', math: '🔢 数学', writing: '✍️ 写作', translation: '🌐 翻译', chat: '💬 对话' };
+      return labels[dim] || dim;
     },
 
     formatTs(ts) {
