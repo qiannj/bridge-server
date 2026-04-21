@@ -7,7 +7,6 @@ Provider 抽象基类 - Bridge Server v2.0
 import asyncio
 import httpx
 import json
-import logging
 import re
 import time
 import uuid
@@ -16,7 +15,9 @@ from typing import Dict, Any, Optional, AsyncGenerator
 from dataclasses import dataclass
 from enum import Enum
 
-logger = logging.getLogger(__name__)
+from ..observability.logging import get_logger
+
+logger = get_logger(__name__)
 
 _OPENAI_EXTRA_PAYLOAD_KEYS = (
     "tools",
@@ -268,6 +269,80 @@ class BaseProvider(ABC):
 
         return {"input": stripped}
 
+    @staticmethod
+    def _preview_text(value: Any, limit: int = 180) -> Optional[str]:
+        if value is None:
+            return None
+        text = str(value).replace("\n", "\\n")
+        if len(text) <= limit:
+            return text
+        return text[:limit] + "..."
+
+    @staticmethod
+    def _extract_structure_flags(content: Any) -> list[str]:
+        if not isinstance(content, str):
+            return []
+        lowered = content.lower()
+        flags = []
+        if "<minimax:tool_call" in lowered:
+            flags.append("minimax_tool_call")
+        if "<tool_call" in lowered:
+            flags.append("tool_call_tag")
+        if "<invoke " in lowered:
+            flags.append("invoke_tag")
+        if "<tool_code" in lowered:
+            flags.append("tool_code_block")
+        if "<tool name=" in lowered:
+            flags.append("tool_name_tag")
+        if "<param name=" in lowered:
+            flags.append("tool_param_tag")
+        return flags
+
+    def _summarize_assistant_structure(self, message: Dict[str, Any], finish_reason: Any = None) -> Dict[str, Any]:
+        content = message.get("content") if isinstance(message, dict) else None
+        tool_calls = message.get("tool_calls") if isinstance(message, dict) else None
+        tool_names = []
+        if isinstance(tool_calls, list):
+            for item in tool_calls[:8]:
+                fn = item.get("function", {}) if isinstance(item, dict) else {}
+                name = fn.get("name") if isinstance(fn, dict) else None
+                if name:
+                    tool_names.append(str(name))
+        reasoning = None
+        if isinstance(message, dict):
+            reasoning = message.get("reasoning_content") or message.get("reasoning")
+        return {
+            "finish_reason": finish_reason,
+            "content_preview": self._preview_text(content),
+            "content_length": len(content) if isinstance(content, str) else None,
+            "structure_flags": self._extract_structure_flags(content),
+            "tool_call_count": len(tool_calls) if isinstance(tool_calls, list) else 0,
+            "tool_names": tool_names,
+            "has_reasoning": bool(reasoning),
+            "reasoning_preview": self._preview_text(reasoning, limit=120),
+        }
+
+    def _log_response_structure(
+        self,
+        *,
+        provider_name: str,
+        stage: str,
+        choice_index: int,
+        before: Dict[str, Any],
+        after: Dict[str, Any],
+    ) -> None:
+        try:
+            logger.info(
+                "provider_response_structure",
+                provider=provider_name,
+                provider_stage=stage,
+                provider_choice_index=choice_index,
+                response_structure_before=before,
+                response_structure_after=after,
+            )
+        except Exception:
+            pass
+
     def _extract_tagged_tool_calls(self, content: Any):
         if not isinstance(content, str):
             return content, []
@@ -382,21 +457,31 @@ class BaseProvider(ABC):
         if not isinstance(choices, list):
             return normalized
 
-        for choice in choices:
+        for index, choice in enumerate(choices):
             if not isinstance(choice, dict):
                 continue
             message = choice.get("message")
-            if not isinstance(message, dict) or message.get("tool_calls"):
+            if not isinstance(message, dict):
                 continue
 
-            cleaned_content, tool_calls = self._extract_tagged_tool_calls(message.get("content"))
-            if not tool_calls:
-                continue
+            before_summary = self._summarize_assistant_structure(message, choice.get("finish_reason"))
 
-            message["content"] = cleaned_content
-            message["tool_calls"] = tool_calls
-            if choice.get("finish_reason") in (None, "stop"):
-                choice["finish_reason"] = "tool_calls"
+            if not message.get("tool_calls"):
+                cleaned_content, tool_calls = self._extract_tagged_tool_calls(message.get("content"))
+                if tool_calls:
+                    message["content"] = cleaned_content
+                    message["tool_calls"] = tool_calls
+                    if choice.get("finish_reason") in (None, "stop"):
+                        choice["finish_reason"] = "tool_calls"
+
+            after_summary = self._summarize_assistant_structure(message, choice.get("finish_reason"))
+            self._log_response_structure(
+                provider_name=provider_name,
+                stage="response",
+                choice_index=index,
+                before=before_summary,
+                after=after_summary,
+            )
 
         return normalized
 
@@ -408,21 +493,32 @@ class BaseProvider(ABC):
         if not isinstance(choices, list):
             return normalized
 
-        for choice in choices:
+        for index, choice in enumerate(choices):
             if not isinstance(choice, dict):
                 continue
             delta = choice.get("delta")
-            if not isinstance(delta, dict) or delta.get("tool_calls"):
+            if not isinstance(delta, dict):
                 continue
 
-            cleaned_content, tool_calls = self._extract_tagged_tool_calls(delta.get("content"))
-            if not tool_calls:
-                continue
+            before_summary = self._summarize_assistant_structure(delta, choice.get("finish_reason"))
 
-            delta["content"] = cleaned_content
-            delta["tool_calls"] = tool_calls
-            if choice.get("finish_reason") in (None, "stop"):
-                choice["finish_reason"] = "tool_calls"
+            if not delta.get("tool_calls"):
+                cleaned_content, tool_calls = self._extract_tagged_tool_calls(delta.get("content"))
+                if tool_calls:
+                    delta["content"] = cleaned_content
+                    delta["tool_calls"] = tool_calls
+                    if choice.get("finish_reason") in (None, "stop"):
+                        choice["finish_reason"] = "tool_calls"
+
+            after_summary = self._summarize_assistant_structure(delta, choice.get("finish_reason"))
+            if before_summary["structure_flags"] or before_summary["tool_call_count"] or after_summary["tool_call_count"]:
+                self._log_response_structure(
+                    provider_name=provider_name,
+                    stage="stream_chunk",
+                    choice_index=index,
+                    before=before_summary,
+                    after=after_summary,
+                )
 
         return normalized
     
