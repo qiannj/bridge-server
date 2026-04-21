@@ -359,16 +359,24 @@ class SetupWizard:
         
         provider = providers_list[idx]
         
-        # 配置 API Key
         print(f"\n配置 {provider.name}:")
         print(f"  Base URL: {provider.base_url}")
-        print(f"  环境变量：{provider.api_key_env}")
-        print(f"  获取地址：{provider.api_key_url}\n")
-        
-        api_key = input(f"请输入 API Key (回车返回): ").strip()
-        if not api_key:
-            return
-        
+
+        # ── 认证方式选择 ──────────────────────────────────────────────────────
+        auth_type = self._choose_auth_type()
+
+        if auth_type == "oauth":
+            oauth_cfg = self._collect_oauth_config()
+            if not oauth_cfg:
+                print(f"{Colors.YELLOW}⚠️  已取消{Colors.ENDC}")
+                return
+        else:
+            print(f"  环境变量：{provider.api_key_env}")
+            print(f"  获取地址：{provider.api_key_url}\n")
+            api_key = input(f"请输入 API Key (回车返回): ").strip()
+            if not api_key:
+                return
+
         # 配置模型
         models = self._add_models_loop(provider)
         if not models:
@@ -377,49 +385,85 @@ class SetupWizard:
         
         # 测试连接
         print(f"\n{Colors.CYAN}测试连接...{Colors.ENDC}")
-        success = self._test_provider_connection(provider.base_url, api_key, models[0]['id'])
+        if auth_type == "oauth":
+            success = self._test_oauth_connection(provider.base_url, oauth_cfg, models[0]['id'])
+        else:
+            success = self._test_provider_connection(provider.base_url, api_key, models[0]['id'])
         
         if success:
-            # 保存配置
-            provider_config = {
-                'name': provider.name,
-                'api_key_env': provider.api_key_env,
-                'base_url': provider.base_url,
-                'models': models
-            }
+            if auth_type == "oauth":
+                provider_config = {
+                    'name': provider.name,
+                    'base_url': provider.base_url,
+                    'auth_type': 'oauth',
+                    'oauth': oauth_cfg,
+                    'models': models,
+                }
+            else:
+                provider_config = {
+                    'name': provider.name,
+                    'api_key_env': provider.api_key_env,
+                    'base_url': provider.base_url,
+                    'models': models,
+                }
+                self._save_env_var(provider.api_key_env, api_key)
+
             self.config['providers'].append(provider_config)
-            
-            # 保存 API Key 到 .env
-            self._save_env_var(provider.api_key_env, api_key)
-            
             print(f"{Colors.GREEN}✅ {provider.name} 配置成功并已保存！{Colors.ENDC}")
         else:
             print(f"{Colors.RED}❌ 连接测试失败，配置未保存{Colors.ENDC}")
+            retry = input("是否跳过连接测试，强制保存？[y/N]: ").strip().lower()
+            if retry == 'y':
+                if auth_type == "oauth":
+                    provider_config = {
+                        'name': provider.name,
+                        'base_url': provider.base_url,
+                        'auth_type': 'oauth',
+                        'oauth': oauth_cfg,
+                        'models': models,
+                    }
+                else:
+                    provider_config = {
+                        'name': provider.name,
+                        'api_key_env': provider.api_key_env,
+                        'base_url': provider.base_url,
+                        'models': models,
+                    }
+                    self._save_env_var(provider.api_key_env, api_key)
+                self.config['providers'].append(provider_config)
+                print(f"{Colors.YELLOW}⚠️  {provider.name} 已强制保存（连接未验证）{Colors.ENDC}")
     
     def _add_custom_provider(self):
         """添加自定义 Provider"""
         print(f"\n{Colors.BOLD}自定义 Provider{Colors.ENDC}")
         print(f"{'-'*60}\n")
-        
+
         # Provider 名称
         name = input("Provider 名称 (如 my-llm): ").strip()
         if not name:
             return
-        
+
         # Base URL
         base_url = input("API Base URL (如 https://api.example.com/v1): ").strip()
         if not base_url:
             return
-        
-        # 自动派生环境变量名，无需用户输入
-        api_key_env = f"{name.upper().replace('-', '_').replace(' ', '_')}_API_KEY"
-        print(f"环境变量名（自动生成）：{Colors.CYAN}{api_key_env}{Colors.ENDC}")
-        
-        # API Key
-        api_key = input(f"请输入 API Key: ").strip()
-        if not api_key:
-            return
-        
+
+        # ── 认证方式选择 ──────────────────────────────────────────────────────
+        auth_type = self._choose_auth_type()
+
+        if auth_type == "oauth":
+            oauth_cfg = self._collect_oauth_config()
+            if not oauth_cfg:
+                print(f"{Colors.YELLOW}⚠️  已取消{Colors.ENDC}")
+                return
+        else:
+            # 标准 API Key
+            api_key_env = f"{name.upper().replace('-', '_').replace(' ', '_')}_API_KEY"
+            print(f"环境变量名（自动生成）：{Colors.CYAN}{api_key_env}{Colors.ENDC}")
+            api_key = input(f"请输入 API Key: ").strip()
+            if not api_key:
+                return
+
         # 配置模型
         print(f"\n添加模型 (每次一个，空行结束):")
         models = []
@@ -428,38 +472,65 @@ class SetupWizard:
             model_id = input(f"  模型{model_idx} ID: ").strip()
             if not model_id:
                 break
-            
             model_name = input(f"  模型{model_idx} 昵称 (回车同 ID): ").strip()
             if not model_name:
                 model_name = model_id
-            
-            models.append({
-                'id': model_id,
-                'name': model_name,
-                'priority': model_idx
-            })
+            models.append({'id': model_id, 'name': model_name, 'priority': model_idx})
             model_idx += 1
-        
+
         if not models:
             print(f"{Colors.RED}❌ 至少添加一个模型{Colors.ENDC}")
             return
-        
-        # 测试连接
+
+        # ── 测试连接 ──────────────────────────────────────────────────────────
         print(f"\n{Colors.CYAN}测试连接...{Colors.ENDC}")
-        success = self._test_provider_connection(base_url, api_key, models[0]['id'])
-        
+        if auth_type == "oauth":
+            success = self._test_oauth_connection(base_url, oauth_cfg, models[0]['id'])
+        else:
+            success = self._test_provider_connection(base_url, api_key, models[0]['id'])
+
         if success:
-            provider_config = {
-                'name': name,
-                'api_key_env': api_key_env,
-                'base_url': base_url,
-                'models': models
-            }
+            if auth_type == "oauth":
+                provider_config = {
+                    'name': name,
+                    'base_url': base_url,
+                    'auth_type': 'oauth',
+                    'oauth': oauth_cfg,
+                    'models': models,
+                }
+            else:
+                provider_config = {
+                    'name': name,
+                    'api_key_env': api_key_env,
+                    'base_url': base_url,
+                    'models': models,
+                }
+                self._save_env_var(api_key_env, api_key)
+
             self.config['providers'].append(provider_config)
-            self._save_env_var(api_key_env, api_key)
             print(f"{Colors.GREEN}✅ {name} 配置成功并已保存！{Colors.ENDC}")
         else:
             print(f"{Colors.RED}❌ 连接测试失败，配置未保存{Colors.ENDC}")
+            retry = input("是否跳过连接测试，强制保存？[y/N]: ").strip().lower()
+            if retry == 'y':
+                if auth_type == "oauth":
+                    provider_config = {
+                        'name': name,
+                        'base_url': base_url,
+                        'auth_type': 'oauth',
+                        'oauth': oauth_cfg,
+                        'models': models,
+                    }
+                else:
+                    provider_config = {
+                        'name': name,
+                        'api_key_env': api_key_env,
+                        'base_url': base_url,
+                        'models': models,
+                    }
+                    self._save_env_var(api_key_env, api_key)
+                self.config['providers'].append(provider_config)
+                print(f"{Colors.YELLOW}⚠️  {name} 已强制保存（连接未验证）{Colors.ENDC}")
     
     def _add_models_loop(self, provider: Provider) -> List[Dict]:
         """循环添加模型"""
@@ -617,7 +688,76 @@ class SetupWizard:
         provider = self.config['providers'].pop(idx)
         print(f"{Colors.GREEN}✓ 已删除 {provider['name']}{Colors.ENDC}")
     
-    def _save_env_var(self, name: str, value: str):
+    def _choose_auth_type(self) -> str:
+        """让用户选择认证方式，返回 'api_key' 或 'oauth'。"""
+        print(f"\n{Colors.CYAN}选择认证方式:{Colors.ENDC}")
+        auth_type = select_from_list(
+            "认证方式（↑↓ 移动，Enter 确认）",
+            ["🔑 API Key（标准 Bearer Token）", "🔐 OAuth 2.0 Client Credentials"],
+            default_index=0,
+        )
+        return "oauth" if "OAuth" in auth_type else "api_key"
+
+    def _collect_oauth_config(self) -> Optional[Dict[str, Any]]:
+        """交互式收集 OAuth 2.0 Client Credentials 配置，返回 oauth dict 或 None（放弃）。"""
+        print(f"\n{Colors.BOLD}OAuth 2.0 配置{Colors.ENDC}")
+        print(f"  grant_type 固定为 client_credentials（标准企业 SSO 场景）\n")
+
+        token_url = input("  Token URL (如 https://oauth.example.com/token): ").strip()
+        if not token_url:
+            return None
+
+        client_id = input("  Client ID: ").strip()
+        if not client_id:
+            return None
+
+        client_secret = input("  Client Secret: ").strip()
+        if not client_secret:
+            return None
+
+        scope = input("  Scope (可选，空格分隔，回车跳过): ").strip()
+
+        cfg: Dict[str, Any] = {
+            "token_url": token_url,
+            "client_id": client_id,
+            "client_secret": client_secret,
+        }
+        if scope:
+            cfg["scope"] = scope
+        return cfg
+
+    def _fetch_oauth_token(self, oauth_cfg: Dict[str, Any]) -> Optional[str]:
+        """用 OAuth client credentials 换取 access_token，失败返回 None。"""
+        data = {
+            "grant_type": "client_credentials",
+            "client_id": oauth_cfg["client_id"],
+            "client_secret": oauth_cfg["client_secret"],
+        }
+        if oauth_cfg.get("scope"):
+            data["scope"] = oauth_cfg["scope"]
+
+        try:
+            resp = httpx.post(oauth_cfg["token_url"], data=data, timeout=10, verify=False)
+            if resp.status_code == 200:
+                token = resp.json().get("access_token")
+                if token:
+                    print(f"  {Colors.GREEN}✓ OAuth Token 获取成功{Colors.ENDC}")
+                    return token
+            print(f"  {Colors.RED}✗ Token 获取失败 (HTTP {resp.status_code}): {resp.text[:150]}{Colors.ENDC}")
+            return None
+        except Exception as e:
+            print(f"  {Colors.RED}✗ OAuth 请求失败：{e}{Colors.ENDC}")
+            return None
+
+    def _test_oauth_connection(self, base_url: str, oauth_cfg: Dict[str, Any], model_id: str) -> bool:
+        """先获取 OAuth token，再测试 API 连通性。"""
+        print(f"  获取 OAuth Token...")
+        token = self._fetch_oauth_token(oauth_cfg)
+        if not token:
+            return False
+        return self._test_provider_connection(base_url, token, model_id)
+
+
         """保存环境变量到 .env 文件"""
         env_content = {}
         if self.env_path.exists():
