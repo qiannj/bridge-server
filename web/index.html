@@ -325,10 +325,25 @@
                 <span class="text-xs text-slate-400 font-normal" x-text="'— ' + (p.models || []).length + ' 个模型'"></span>
               </summary>
               <div class="px-5 pb-4">
-                <div class="flex flex-wrap gap-2 mt-2">
-                  <template x-for="m in (p.models || [])" :key="m.id || m">
-                    <span class="bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs px-2.5 py-1 rounded-full" x-text="m.id || m"></span>
-                  </template>
+                <div class="mt-2 overflow-x-auto">
+                  <table class="w-full text-xs">
+                    <thead>
+                      <tr class="text-slate-400 border-b border-slate-100 dark:border-slate-700">
+                        <th class="text-left pb-1 font-medium">模型 ID</th>
+                        <th class="text-right pb-1 font-medium">输入 ¥/1K</th>
+                        <th class="text-right pb-1 font-medium">输出 ¥/1K</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-for="m in (p.models || [])" :key="m.id || m">
+                        <tr class="border-b border-slate-50 dark:border-slate-700/50 last:border-0">
+                          <td class="py-1 pr-4 font-mono text-slate-700 dark:text-slate-300" x-text="m.id || m"></td>
+                          <td class="py-1 pr-2 text-right text-slate-500 dark:text-slate-400" x-text="m.input_cost ? '¥' + Number(m.input_cost).toFixed(4) : '—'"></td>
+                          <td class="py-1 text-right text-slate-500 dark:text-slate-400" x-text="m.output_cost ? '¥' + Number(m.output_cost).toFixed(4) : '—'"></td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </details>
@@ -872,9 +887,27 @@
         </div>
       </div>
       <div>
-        <label class="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">模型列表 <span class="text-xs text-slate-400">（每行一个）</span></label>
-        <textarea x-model="newProvider.models" rows="4" placeholder="gpt-4o&#10;gpt-4o-mini&#10;gpt-3.5-turbo"
-          class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent font-mono resize-none"></textarea>
+        <label class="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">模型列表</label>
+        <div class="grid grid-cols-[1fr_80px_80px_28px] gap-1 text-xs text-slate-400 mb-1 px-1">
+          <span>模型 ID</span>
+          <span class="text-center">输入¥/1K</span>
+          <span class="text-center">输出¥/1K</span>
+          <span></span>
+        </div>
+        <template x-for="(row, i) in newProvider.modelList" :key="i">
+          <div class="grid grid-cols-[1fr_80px_80px_28px] gap-1 mb-1">
+            <input x-model="row.id" type="text" placeholder="gpt-4o"
+              class="px-2 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent font-mono" />
+            <input x-model.number="row.input_cost" type="number" min="0" step="0.001" placeholder="0"
+              class="px-2 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent text-right" />
+            <input x-model.number="row.output_cost" type="number" min="0" step="0.001" placeholder="0"
+              class="px-2 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent text-right" />
+            <button type="button" @click="newProvider.modelList.splice(i, 1)"
+              class="flex items-center justify-center rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 text-sm font-bold transition-colors">✕</button>
+          </div>
+        </template>
+        <button type="button" @click="newProvider.modelList.push({id: '', input_cost: 0, output_cost: 0})"
+          class="mt-1 text-xs text-brand-500 hover:text-brand-700 dark:hover:text-brand-300 font-medium">+ 添加模型</button>
       </div>
       <div class="flex gap-3 pt-1">
         <button type="button" @click="showAddProvider = false"
@@ -941,9 +974,27 @@
         </div>
       </div>
       <div>
-        <label class="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">模型列表 <span class="text-xs text-slate-400">（每行一个）</span></label>
-        <textarea x-model="editProvider.models" rows="5"
-          class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent font-mono resize-none"></textarea>
+        <label class="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">模型列表</label>
+        <div class="grid grid-cols-[1fr_80px_80px_28px] gap-1 text-xs text-slate-400 mb-1 px-1">
+          <span>模型 ID</span>
+          <span class="text-center">输入¥/1K</span>
+          <span class="text-center">输出¥/1K</span>
+          <span></span>
+        </div>
+        <template x-for="(row, i) in editProvider.modelList" :key="i">
+          <div class="grid grid-cols-[1fr_80px_80px_28px] gap-1 mb-1">
+            <input x-model="row.id" type="text" placeholder="gpt-4o"
+              class="px-2 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent font-mono" />
+            <input x-model.number="row.input_cost" type="number" min="0" step="0.001" placeholder="0"
+              class="px-2 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent text-right" />
+            <input x-model.number="row.output_cost" type="number" min="0" step="0.001" placeholder="0"
+              class="px-2 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent text-right" />
+            <button type="button" @click="editProvider.modelList.splice(i, 1)"
+              class="flex items-center justify-center rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 text-sm font-bold transition-colors">✕</button>
+          </div>
+        </template>
+        <button type="button" @click="editProvider.modelList.push({id: '', input_cost: 0, output_cost: 0})"
+          class="mt-1 text-xs text-brand-500 hover:text-brand-700 dark:hover:text-brand-300 font-medium">+ 添加模型</button>
       </div>
       <div class="flex gap-3 pt-1">
         <button type="button" @click="showEditProvider = false"
@@ -1038,11 +1089,11 @@ function app() {
     toast: '',
     toastType: 'success',
     showAddProvider: false,
-    newProvider: { name: '', base_url: '', api_key: '', auth_type: 'api_key', oauth_token_url: '', oauth_client_id: '', oauth_client_secret: '', oauth_scope: '', models: '' },
+    newProvider: { name: '', base_url: '', api_key: '', auth_type: 'api_key', oauth_token_url: '', oauth_client_id: '', oauth_client_secret: '', oauth_scope: '', modelList: [{id: '', input_cost: 0, output_cost: 0}] },
     deleteTarget: '',
     showEditProvider: false,
     editTarget: '',
-    editProvider: { api_key: '', auth_type: 'api_key', oauth_token_url: '', oauth_client_id: '', oauth_client_secret: '', oauth_scope: '', models: '' },
+    editProvider: { api_key: '', auth_type: 'api_key', oauth_token_url: '', oauth_client_id: '', oauth_client_secret: '', oauth_scope: '', modelList: [] },
 
     async init() {
       // Apply dark mode class
@@ -1201,15 +1252,18 @@ function app() {
     },
 
     async doAddProvider() {
-      const models = this.newProvider.models.split('\n').map(s => s.trim()).filter(Boolean);
+      const models = this.newProvider.modelList.filter(r => r.id.trim());
       if (!this.newProvider.name || !this.newProvider.base_url) {
         this.showToast('请填写 Provider 名称和 Base URL', 'error'); return;
+      }
+      if (models.length === 0) {
+        this.showToast('请至少添加一个模型', 'error'); return;
       }
       const body = {
         name: this.newProvider.name,
         base_url: this.newProvider.base_url,
         auth_type: this.newProvider.auth_type,
-        models: models,
+        models: models.map(r => ({ id: r.id.trim(), input_cost: r.input_cost || 0, output_cost: r.output_cost || 0 })),
       };
       if (this.newProvider.auth_type === 'oauth') {
         if (!this.newProvider.oauth_token_url || !this.newProvider.oauth_client_id || !this.newProvider.oauth_client_secret) {
@@ -1236,7 +1290,7 @@ function app() {
         });
         if (res.ok) {
           this.showAddProvider = false;
-          this.newProvider = { name: '', base_url: '', api_key: '', auth_type: 'api_key', oauth_token_url: '', oauth_client_id: '', oauth_client_secret: '', oauth_scope: '', models: '' };
+          this.newProvider = { name: '', base_url: '', api_key: '', auth_type: 'api_key', oauth_token_url: '', oauth_client_id: '', oauth_client_secret: '', oauth_scope: '', modelList: [{id: '', input_cost: 0, output_cost: 0}] };
           await this.loadConfig();
           this.showToast('Provider 添加成功！');
         } else {
@@ -1265,14 +1319,23 @@ function app() {
         oauth_client_id: oauth.client_id || '',
         oauth_client_secret: '',  // never pre-fill secret
         oauth_scope: oauth.scope || '',
-        models: (p.models || []).map(m => m.id || m).join('\n'),
+        modelList: (p.models || []).map(m => ({
+          id: m.id || m,
+          input_cost: m.input_cost || 0,
+          output_cost: m.output_cost || 0,
+        })),
       };
+      if (this.editProvider.modelList.length === 0) {
+        this.editProvider.modelList.push({id: '', input_cost: 0, output_cost: 0});
+      }
       this.showEditProvider = true;
     },
 
     async doEditProvider() {
       if (!this.editTarget) return;
-      const models = this.editProvider.models.split('\n').map(s => s.trim()).filter(Boolean);
+      const models = this.editProvider.modelList
+        .filter(r => r.id.trim())
+        .map(r => ({ id: r.id.trim(), input_cost: r.input_cost || 0, output_cost: r.output_cost || 0 }));
       this.loading = true;
       try {
         const body = { models };

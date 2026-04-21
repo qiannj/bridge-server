@@ -124,6 +124,22 @@ async def get_config():
     return config
 
 
+class ModelConfig(BaseModel):
+    id: str
+    name: Optional[str] = None
+    input_cost: float = 0.0   # ¥ per 1K input tokens
+    output_cost: float = 0.0  # ¥ per 1K output tokens
+
+
+def _model_config_to_dict(m: ModelConfig) -> dict:
+    d: dict = {"id": m.id, "name": m.name or m.id}
+    if m.input_cost:
+        d["input_cost"] = m.input_cost
+    if m.output_cost:
+        d["output_cost"] = m.output_cost
+    return d
+
+
 class OAuthConfig(BaseModel):
     token_url: str
     client_id: str
@@ -140,7 +156,7 @@ class ProviderAddRequest(BaseModel):
     # oauth auth
     auth_type: str = "api_key"  # "api_key" | "oauth"
     oauth: Optional[OAuthConfig] = None
-    models: List[str]
+    models: List[ModelConfig]
 
 
 @router.post("/providers", dependencies=_deps)
@@ -160,7 +176,7 @@ async def add_provider(req: ProviderAddRequest):
             "base_url": req.base_url,
             "auth_type": "oauth",
             "oauth": req.oauth.model_dump(exclude_none=True),
-            "models": [{"id": m, "name": m} for m in req.models],
+            "models": [_model_config_to_dict(m) for m in req.models],
         }
     else:
         if not req.api_key:
@@ -171,7 +187,7 @@ async def add_provider(req: ProviderAddRequest):
             "base_url": req.base_url,
             "api_key_env": env_var,
             "api_key": req.api_key,
-            "models": [{"id": m, "name": m} for m in req.models],
+            "models": [_model_config_to_dict(m) for m in req.models],
         }
         # Save to .env
         env_file = _get_config_dir() / ".env"
@@ -202,7 +218,7 @@ async def delete_provider(name: str):
 class ProviderUpdateRequest(BaseModel):
     api_key: Optional[str] = None
     oauth: Optional[OAuthConfig] = None
-    models: Optional[List[str]] = None
+    models: Optional[List[ModelConfig]] = None
 
 
 @router.put("/providers/{name}", dependencies=_deps)
@@ -235,7 +251,7 @@ async def update_provider(name: str, req: ProviderUpdateRequest):
                 p["oauth"] = existing
             # Update models
             if req.models is not None:
-                p["models"] = [{"id": m, "name": m} for m in req.models if m.strip()]
+                p["models"] = [_model_config_to_dict(m) for m in req.models]
             break
     if not found:
         raise HTTPException(status_code=404, detail=f"Provider '{name}' 不存在")
