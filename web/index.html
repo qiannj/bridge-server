@@ -394,6 +394,28 @@
       <!-- ── ROUTING ── -->
       <div x-show="page === 'routing'" x-cloak>
 
+        <!-- Routing priority status bar -->
+        <div x-show="bypassRouter.enabled || activeCustomRouter"
+          class="mb-4 flex items-center gap-2 px-4 py-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 text-xs text-slate-500 dark:text-slate-400 flex-wrap">
+          <span class="font-semibold text-slate-600 dark:text-slate-300 flex-shrink-0">当前路由优先级：</span>
+          <span class="px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300">1 · 客户端指定模型</span>
+          <span class="text-slate-300 dark:text-slate-600">›</span>
+          <span :class="bypassRouter.enabled ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 font-semibold ring-1 ring-purple-300 dark:ring-purple-700' : 'bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500 line-through'"
+            class="px-2 py-0.5 rounded">
+            2 · 旁路路由器<template x-if="bypassRouter.enabled"> <span class="ml-1">✓</span></template>
+          </span>
+          <span class="text-slate-300 dark:text-slate-600">›</span>
+          <span :class="activeCustomRouter && !bypassRouter.enabled ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-semibold ring-1 ring-blue-300 dark:ring-blue-700' : (activeCustomRouter && bypassRouter.enabled ? 'bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500 line-through' : 'bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500')"
+            class="px-2 py-0.5 rounded"
+            x-text="activeCustomRouter ? ('3 · 插件路由器「' + activeCustomRouter + '」') : '3 · 插件路由器'">
+          </span>
+          <span class="text-slate-300 dark:text-slate-600">›</span>
+          <span class="px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400">4 · 场景路由（本页）</span>
+          <template x-if="bypassRouter.enabled && activeCustomRouter">
+            <span class="ml-auto text-amber-600 dark:text-amber-400 font-medium flex-shrink-0">⚠️ 插件路由器被旁路路由器覆盖</span>
+          </template>
+        </div>
+
         <!-- Strategy row -->
         <div class="bg-white dark:bg-slate-800 rounded-xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm mb-4 flex items-center gap-4">
           <span class="text-sm font-semibold text-slate-700 dark:text-slate-300 flex-shrink-0">路由策略</span>
@@ -520,6 +542,26 @@
           <div>
             <p class="text-sm font-semibold text-purple-900 dark:text-purple-200">旁路模型路由器</p>
             <p class="text-xs text-purple-700 dark:text-purple-300 mt-0.5">指定一个 LLM 作为路由决策模型，根据你的路由规则自动选择最合适的执行模型，并可选地对长对话上下文进行压缩后再发送。优先级高于场景路由，低于客户端明确指定的 model。</p>
+          </div>
+        </div>
+
+        <!-- Mutual-exclusion warning: custom plugin router is active -->
+        <div x-show="activeCustomRouter" x-cloak
+          class="mb-4 flex items-start gap-3 p-4 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800">
+          <span class="text-xl flex-shrink-0 mt-0.5">⚠️</span>
+          <div class="flex-1">
+            <p class="text-sm font-semibold text-amber-800 dark:text-amber-300">
+              代码插件路由器「<span x-text="activeCustomRouter" class="font-mono"></span>」当前已激活
+            </p>
+            <p class="text-xs text-amber-700 dark:text-amber-400 mt-1">
+              旁路路由器与代码插件路由器是<strong>同级替代方案</strong>。
+              <template x-if="bypassRouter.enabled">
+                <span>由于旁路路由器已启用，代码插件路由器将被<strong>跳过</strong>。如需使用代码插件路由器，请先关闭旁路路由器。</span>
+              </template>
+              <template x-if="!bypassRouter.enabled">
+                <span>若启用旁路路由器，代码插件路由器将被跳过，两者同时只有一个生效。</span>
+              </template>
+            </p>
           </div>
         </div>
 
@@ -1549,6 +1591,7 @@ function app() {
     bypassRouter: { enabled: false, routing_model: '', routing_rules: '', timeout_ms: 3000, compress_context_threshold: 10 },
     bypassRouterTestResult: null,
     bypassRouterTesting: false,
+    activeCustomRouter: null,   // name of active code-plugin router, or null
 
     async init() {
       // Apply dark mode class
@@ -1611,7 +1654,7 @@ function app() {
       this.page = p;
       if (p === 'dashboard') await Promise.all([this.loadStatus(), this.loadUsage()]);
       else if (p === 'providers') await Promise.all([this.loadConfig(), this.loadStatus(), this.loadBenchmarkResults()]);
-      else if (p === 'routing') await Promise.all([this.loadConfig(), this.loadRouting()]);
+      else if (p === 'routing') await Promise.all([this.loadConfig(), this.loadRouting(), this.loadBypassRouter()]);
       else if (p === 'bypass-router') await this.loadBypassRouter();
       else if (p === 'usage') { await this.loadUsage(); this.$nextTick(() => this.renderChart()); }
       else if (p === 'savings') { await Promise.all([this.loadSavingsOverview(), this.loadSavings(), this.loadSavingsConfig()]); this.$nextTick(() => this.renderSavingsChart()); }
@@ -1974,8 +2017,15 @@ function app() {
 
     async loadBypassRouter() {
       try {
-        const res = await this.api('/api/admin/bypass-router');
-        if (res.ok) this.bypassRouter = await res.json();
+        const [brRes, arRes] = await Promise.all([
+          this.api('/api/admin/bypass-router'),
+          this.api('/api/admin/router/active').catch(() => null),
+        ]);
+        if (brRes.ok) this.bypassRouter = await brRes.json();
+        if (arRes && arRes.ok) {
+          const arData = await arRes.json();
+          this.activeCustomRouter = arData.active || null;
+        }
       } catch (e) { console.warn('loadBypassRouter:', e); }
     },
 
