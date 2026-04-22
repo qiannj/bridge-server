@@ -6,822 +6,483 @@
   <title>Bridge Server — AI 接口统一网关</title>
   <style>
     :root {
-      --brand: #6366f1;
-      --brand-dark: #4338ca;
-      --brand-light: #e0e7ff;
-      --text: #1e293b;
-      --muted: #64748b;
-      --bg: #f8fafc;
-      --card: #ffffff;
-      --border: #e2e8f0;
-      --code-bg: #0f172a;
-      --radius: 16px;
+      --bg: #080808;
+      --s1: #0f0f0f;
+      --s2: #141414;
+      --s3: #1c1c1c;
+      --border: rgba(255,255,255,.07);
+      --border-h: rgba(255,255,255,.14);
+      --txt: #ffffff;
+      --txt2: rgba(255,255,255,.6);
+      --txt3: rgba(255,255,255,.3);
+      --accent: #818cf8;
+      --accent-d: #6366f1;
+      --green: #34d399;
+      --amber: #fbbf24;
+      --r: 14px;
     }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    html { scroll-behavior: smooth; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
-    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    html{scroll-behavior:smooth}
+    body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Segoe UI','PingFang SC','Hiragino Sans GB',sans-serif;background:var(--bg);color:var(--txt);line-height:1.6;overflow-x:hidden}
 
-    /* ── NAV ── */
-    nav {
-      position: sticky; top: 0; z-index: 100;
-      background: rgba(255,255,255,0.85);
-      backdrop-filter: blur(12px);
-      border-bottom: 1px solid var(--border);
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 0 2rem; height: 60px;
-    }
-    .nav-logo { display: flex; align-items: center; gap: 10px; text-decoration: none; }
-    .nav-logo-icon {
-      width: 36px; height: 36px; border-radius: 10px;
-      background: linear-gradient(135deg, #6366f1, #818cf8);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 18px; flex-shrink: 0;
-    }
-    .nav-logo-text { font-size: 1rem; font-weight: 700; color: var(--text); }
-    .nav-links { display: flex; gap: 1.5rem; list-style: none; }
-    .nav-links a { text-decoration: none; font-size: 0.875rem; color: var(--muted); transition: color .15s; }
-    .nav-links a:hover { color: var(--brand); }
-    .nav-cta {
-      background: var(--brand); color: white;
-      padding: 6px 16px; border-radius: 8px;
-      font-size: 0.875rem; font-weight: 600; text-decoration: none;
-      transition: background .15s;
-    }
-    .nav-cta:hover { background: var(--brand-dark); }
+    /* ─── NAV ─── */
+    nav{position:fixed;top:0;left:0;right:0;z-index:200;display:flex;align-items:center;justify-content:space-between;padding:0 2rem;height:58px;background:rgba(8,8,8,.75);backdrop-filter:blur(20px) saturate(1.8);border-bottom:1px solid var(--border);transition:border-color .3s}
+    nav.scrolled{border-color:rgba(255,255,255,.12)}
+    .nav-logo{display:flex;align-items:center;gap:10px;text-decoration:none}
+    .nav-logo-icon{width:30px;height:30px;border-radius:7px;background:linear-gradient(135deg,#6366f1,#818cf8);display:grid;place-items:center;font-size:14px;flex-shrink:0}
+    .nav-logo-text{font-size:.9rem;font-weight:700;color:var(--txt)}
+    .nav-links{display:flex;gap:2rem}
+    .nav-links a{font-size:.83rem;color:var(--txt2);text-decoration:none;transition:color .15s}
+    .nav-links a:hover{color:var(--txt)}
+    .nav-right{display:flex;gap:8px;align-items:center}
+    .btn-ghost{font-size:.83rem;color:var(--txt2);padding:6px 14px;border-radius:8px;text-decoration:none;transition:color .15s,background .15s}
+    .btn-ghost:hover{color:var(--txt);background:rgba(255,255,255,.06)}
+    .btn-solid{font-size:.83rem;font-weight:700;color:var(--bg);background:var(--txt);padding:7px 16px;border-radius:8px;text-decoration:none;transition:opacity .15s}
+    .btn-solid:hover{opacity:.85}
 
-    /* ── HERO ── */
-    .hero {
-      background: linear-gradient(135deg, #6366f1 0%, #818cf8 40%, #a5b4fc 100%);
-      padding: 5rem 2rem 4rem;
-      text-align: center;
-      position: relative;
-      overflow: hidden;
-    }
-    .hero::before {
-      content: '';
-      position: absolute; inset: 0;
-      background: radial-gradient(ellipse 80% 60% at 50% 110%, rgba(255,255,255,.15), transparent);
-    }
-    .hero-badge {
-      display: inline-flex; align-items: center; gap: 6px;
-      background: rgba(255,255,255,.2); border: 1px solid rgba(255,255,255,.3);
-      color: white; padding: 4px 14px; border-radius: 100px;
-      font-size: 0.8rem; font-weight: 600; margin-bottom: 1.5rem;
-    }
-    .hero h1 {
-      font-size: clamp(2.2rem, 5vw, 3.6rem);
-      font-weight: 800; color: white;
-      line-height: 1.15; margin-bottom: 1rem;
-    }
-    .hero h1 span { color: #fde68a; }
-    .hero p {
-      font-size: clamp(1rem, 2vw, 1.2rem);
-      color: rgba(255,255,255,.88);
-      max-width: 600px; margin: 0 auto 2.5rem;
-    }
-    .hero-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
-    .btn-primary {
-      background: white; color: var(--brand-dark);
-      padding: 12px 28px; border-radius: 10px;
-      font-size: 0.95rem; font-weight: 700;
-      text-decoration: none; display: inline-flex; align-items: center; gap: 8px;
-      box-shadow: 0 4px 24px rgba(0,0,0,.15);
-      transition: transform .15s, box-shadow .15s;
-    }
-    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(0,0,0,.2); }
-    .btn-secondary {
-      background: rgba(255,255,255,.15); color: white;
-      border: 1.5px solid rgba(255,255,255,.4);
-      padding: 12px 28px; border-radius: 10px;
-      font-size: 0.95rem; font-weight: 600;
-      text-decoration: none; display: inline-flex; align-items: center; gap: 8px;
-      transition: background .15s;
-    }
-    .btn-secondary:hover { background: rgba(255,255,255,.25); }
+    /* ─── HERO ─── */
+    .hero{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:120px 2rem 80px;position:relative;overflow:hidden}
+    .hero::before{content:'';position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);background-size:56px 56px;mask-image:radial-gradient(ellipse 75% 65% at 50% 40%,black,transparent);pointer-events:none}
+    .orb{position:absolute;border-radius:50%;filter:blur(90px);pointer-events:none;animation:orb 14s ease-in-out infinite}
+    .orb-1{width:550px;height:550px;background:radial-gradient(circle,rgba(79,70,229,.55),transparent);top:-180px;left:-60px;animation-delay:0s}
+    .orb-2{width:460px;height:460px;background:radial-gradient(circle,rgba(6,182,212,.4),transparent);bottom:-100px;right:-60px;animation-delay:-7s}
+    @keyframes orb{0%,100%{transform:translate(0,0) scale(1)}33%{transform:translate(35px,-25px) scale(1.06)}66%{transform:translate(-18px,18px) scale(.95)}}
 
-    /* ── METRICS BAR ── */
-    .metrics-bar {
-      background: white;
-      border-bottom: 1px solid var(--border);
-      padding: 1.2rem 2rem;
-      display: flex; justify-content: center; gap: 3rem; flex-wrap: wrap;
-    }
-    .metric { text-align: center; }
-    .metric-num { font-size: 1.5rem; font-weight: 800; color: var(--brand); }
-    .metric-label { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+    .hero-badge{position:relative;z-index:1;display:inline-flex;align-items:center;gap:7px;background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.28);color:#a5b4fc;padding:5px 14px;border-radius:100px;font-size:.75rem;font-weight:500;margin-bottom:2.2rem;letter-spacing:.01em}
+    .badge-dot{width:6px;height:6px;border-radius:50%;background:#818cf8;animation:pulse 2s ease-in-out infinite}
+    @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.65)}}
 
-    /* ── SECTIONS ── */
-    section { padding: 5rem 2rem; max-width: 1100px; margin: 0 auto; }
-    .section-tag {
-      display: inline-block;
-      background: var(--brand-light); color: var(--brand-dark);
-      padding: 3px 12px; border-radius: 100px;
-      font-size: 0.75rem; font-weight: 700; margin-bottom: 1rem;
-      text-transform: uppercase; letter-spacing: .05em;
-    }
-    h2 {
-      font-size: clamp(1.6rem, 3vw, 2.2rem);
-      font-weight: 800; color: var(--text); margin-bottom: 0.75rem;
-    }
-    .section-sub { font-size: 1.05rem; color: var(--muted); max-width: 560px; margin-bottom: 3rem; }
+    h1.hero-title{position:relative;z-index:1;font-size:clamp(3rem,8vw,6rem);font-weight:800;letter-spacing:-.04em;line-height:1.04;margin-bottom:1.6rem}
+    .gt{background:linear-gradient(160deg,#fff 0%,rgba(255,255,255,.55) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+    .at{background:linear-gradient(135deg,#818cf8 0%,#34d399 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
 
-    /* ── PROBLEM ── */
-    .problem-grid {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 1.5rem;
-    }
-    .problem-card {
-      background: var(--card); border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 1.8rem;
-    }
-    .problem-card .icon { font-size: 2rem; margin-bottom: 1rem; }
-    .problem-card h3 { font-size: 1rem; font-weight: 700; margin-bottom: 0.5rem; }
-    .problem-card p { font-size: 0.875rem; color: var(--muted); line-height: 1.65; }
-    .arrow-row {
-      display: flex; align-items: center; justify-content: center;
-      gap: 1rem; margin: 2.5rem 0; flex-wrap: wrap;
-    }
-    .arrow-chip {
-      background: var(--brand-light); color: var(--brand-dark);
-      padding: 8px 20px; border-radius: 100px;
-      font-size: 0.85rem; font-weight: 600;
-    }
-    .arrow { font-size: 1.5rem; color: var(--brand); }
+    .hero-sub{position:relative;z-index:1;font-size:clamp(.95rem,2vw,1.15rem);color:var(--txt2);max-width:500px;line-height:1.75;margin-bottom:2.8rem}
+    .hero-actions{position:relative;z-index:1;display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-bottom:5rem}
+    .btn-cta{display:inline-flex;align-items:center;gap:8px;background:var(--txt);color:var(--bg);padding:13px 28px;border-radius:10px;font-size:.93rem;font-weight:700;text-decoration:none;transition:opacity .15s,transform .15s}
+    .btn-cta:hover{opacity:.9;transform:translateY(-1px)}
+    .btn-outline{display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,.055);color:var(--txt2);border:1px solid var(--border-h);padding:13px 28px;border-radius:10px;font-size:.93rem;font-weight:600;text-decoration:none;transition:background .15s,color .15s,transform .15s}
+    .btn-outline:hover{background:rgba(255,255,255,.1);color:var(--txt);transform:translateY(-1px)}
 
-    /* ── FEATURES ── */
-    #features { background: white; max-width: 100%; padding: 5rem 2rem; }
-    #features .inner { max-width: 1100px; margin: 0 auto; }
-    .features-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-      gap: 1.5rem;
-    }
-    .feature-card {
-      background: var(--bg); border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 1.8rem;
-      transition: box-shadow .2s, transform .2s;
-    }
-    .feature-card:hover { box-shadow: 0 8px 32px rgba(99,102,241,.12); transform: translateY(-3px); }
-    .feature-card .feat-icon {
-      width: 44px; height: 44px; border-radius: 12px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 1.3rem; margin-bottom: 1rem;
-    }
-    .feat-purple { background: #ede9fe; }
-    .feat-blue   { background: #dbeafe; }
-    .feat-green  { background: #dcfce7; }
-    .feat-amber  { background: #fef3c7; }
-    .feat-rose   { background: #ffe4e6; }
-    .feat-cyan   { background: #cffafe; }
-    .feature-card h3 { font-size: 1rem; font-weight: 700; margin-bottom: 0.5rem; }
-    .feature-card p { font-size: 0.875rem; color: var(--muted); line-height: 1.65; }
-    .feat-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 1rem; }
-    .feat-tag {
-      background: white; border: 1px solid var(--border);
-      color: var(--muted); font-size: 0.7rem; padding: 2px 8px; border-radius: 100px;
-    }
+    /* terminal */
+    .terminal{position:relative;z-index:1;width:100%;max-width:720px;background:var(--s1);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;box-shadow:0 50px 120px rgba(0,0,0,.7),0 0 0 1px rgba(255,255,255,.04),0 0 80px rgba(99,102,241,.06)}
+    .t-bar{display:flex;align-items:center;gap:6px;padding:11px 16px;background:rgba(255,255,255,.025);border-bottom:1px solid var(--border)}
+    .t-dot{width:10px;height:10px;border-radius:50%}
+    .t-r{background:#ff5f56}.t-y{background:#ffbd2e}.t-g{background:#27c93f}
+    .t-title{flex:1;text-align:center;font-size:.7rem;color:var(--txt3);font-family:'SF Mono','Fira Code',monospace}
+    .t-body{padding:1.6rem 2rem;font-family:'SF Mono','Fira Code','Consolas',monospace;font-size:.82rem;line-height:2;text-align:left}
+    .tc-prompt{color:#334155}.tc-cmd{color:#e2e8f0}.tc-cmt{color:#374151}
+    .tc-key{color:#818cf8}.tc-val{color:#34d399}.tc-str{color:#fbbf24}.tc-route{color:#a5b4fc}
+    .tc-meta{color:#475569;font-size:.76rem}
+    .t-cursor{display:inline-block;width:8px;height:.9em;background:var(--txt);vertical-align:text-bottom;animation:blink .85s step-end infinite}
+    @keyframes blink{50%{opacity:0}}
 
-    /* ── ROUTING ── */
-    .routing-flow {
-      background: var(--code-bg);
-      border-radius: var(--radius);
-      padding: 2.5rem;
-      margin-top: 2.5rem;
-      font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
-      font-size: 0.875rem;
-      line-height: 2;
-      overflow-x: auto;
-    }
-    .rf-title { color: #94a3b8; margin-bottom: 1rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: .1em; }
-    .rf-line { display: flex; align-items: baseline; gap: 1rem; }
-    .rf-num { color: #475569; min-width: 20px; }
-    .rf-badge {
-      display: inline-block;
-      padding: 1px 10px; border-radius: 6px;
-      font-size: 0.8rem; font-weight: 600;
-    }
-    .rb-direct  { background: #1e3a5f; color: #93c5fd; }
-    .rb-bypass  { background: #3b1f6b; color: #c4b5fd; }
-    .rb-plugin  { background: #1c3d32; color: #6ee7b7; }
-    .rb-smart   { background: #3d2a10; color: #fbbf24; }
-    .rb-default { background: #1e293b; color: #94a3b8; }
-    .rf-desc { color: #94a3b8; }
-    .rf-tag-new {
-      background: #14532d; color: #4ade80;
-      font-size: 0.65rem; padding: 1px 7px; border-radius: 4px;
-      vertical-align: middle; margin-left: 6px;
-    }
-    .rf-arrow { color: #475569; margin: 0 8px; }
-    .rf-fallback { color: #475569; font-size: 0.8rem; margin-left: 2rem; }
+    /* ─── COMPAT STRIP ─── */
+    .compat{border-top:1px solid var(--border);border-bottom:1px solid var(--border);padding:1.8rem 2rem;text-align:center}
+    .compat-lbl{font-size:.68rem;text-transform:uppercase;letter-spacing:.18em;color:var(--txt3);margin-bottom:1.2rem}
+    .compat-row{display:flex;justify-content:center;align-items:center;gap:2.5rem;flex-wrap:wrap}
+    .compat-item{display:flex;align-items:center;gap:7px;font-size:.82rem;font-weight:500;color:var(--txt3);transition:color .2s}
+    .compat-item:hover{color:var(--txt2)}
 
-    /* ── CODE BLOCK ── */
-    .code-area {
-      background: var(--code-bg);
-      border-radius: var(--radius); overflow: hidden;
-      margin-top: 1.5rem;
-    }
-    .code-header {
-      background: #1e293b;
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 10px 1.5rem;
-    }
-    .code-dots { display: flex; gap: 6px; }
-    .code-dots span {
-      width: 12px; height: 12px; border-radius: 50%;
-    }
-    .cd-red { background: #ff5f56; }
-    .cd-yellow { background: #ffbd2e; }
-    .cd-green { background: #27c93f; }
-    .code-lang { color: #94a3b8; font-size: 0.75rem; font-family: monospace; }
-    .code-body {
-      padding: 1.5rem;
-      font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
-      font-size: 0.85rem; line-height: 1.8;
-      overflow-x: auto;
-    }
-    .c-gray   { color: #64748b; }
-    .c-green  { color: #4ade80; }
-    .c-yellow { color: #fde68a; }
-    .c-blue   { color: #93c5fd; }
-    .c-purple { color: #c4b5fd; }
-    .c-orange { color: #fb923c; }
-    .c-cyan   { color: #67e8f9; }
-    .c-white  { color: #f1f5f9; }
+    /* ─── SECTION HELPERS ─── */
+    .section{max-width:1100px;margin:0 auto;padding:7rem 2rem}
+    .s-label{font-size:.68rem;text-transform:uppercase;letter-spacing:.18em;color:var(--accent);font-weight:700;margin-bottom:1rem;display:flex;align-items:center;gap:10px}
+    .s-label::before{content:'';display:block;width:18px;height:1px;background:var(--accent)}
+    h2.s-title{font-size:clamp(1.7rem,3.5vw,2.7rem);font-weight:800;letter-spacing:-.025em;line-height:1.15;margin-bottom:.9rem}
+    .s-desc{font-size:1rem;color:var(--txt2);max-width:480px;line-height:1.75;margin-bottom:3.5rem}
 
-    /* ── QUICKSTART TABS ── */
-    .tabs { display: flex; gap: 4px; margin-bottom: -1px; }
-    .tab {
-      padding: 8px 18px; border-radius: 8px 8px 0 0;
-      font-size: 0.8rem; font-weight: 600; cursor: pointer;
-      background: #1e293b; color: #64748b; border: 1px solid #334155; border-bottom: none;
-      user-select: none; transition: color .15s, background .15s;
-    }
-    .tab:hover { color: #94a3b8; }
-    .tab.active { background: #0f172a; color: #e2e8f0; border-color: #475569; }
-    .tab-content { display: none; }
-    .tab-content.active { display: block; }
+    /* ─── BENTO ─── */
+    .bento{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--border);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+    .bc{background:var(--s1);padding:2.2rem;transition:background .25s;cursor:default}
+    .bc:hover{background:var(--s2)}
+    .bc.w2{grid-column:span 2}
+    .bc-icon{font-size:1.5rem;margin-bottom:1.2rem;line-height:1}
+    .bc-title{font-size:.95rem;font-weight:700;margin-bottom:.5rem}
+    .bc-desc{font-size:.83rem;color:var(--txt2);line-height:1.68}
+    .bc-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:1rem}
+    .bc-tag{background:rgba(255,255,255,.04);border:1px solid var(--border);color:var(--txt3);font-size:.68rem;padding:2px 9px;border-radius:100px}
+    .bc-new{background:rgba(52,211,153,.08);border-color:rgba(52,211,153,.25);color:#34d399}
 
-    /* ── COPY BUTTON ── */
-    .copy-btn {
-      background: #334155; color: #94a3b8;
-      border: none; padding: 4px 12px; border-radius: 6px;
-      font-size: 0.72rem; cursor: pointer; transition: background .15s, color .15s;
-    }
-    .copy-btn:hover { background: #475569; color: #e2e8f0; }
-    .copy-btn.copied { background: #14532d; color: #4ade80; }
+    /* ─── STATS ─── */
+    .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--border);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;max-width:1100px;margin:0 auto;padding:0 2rem}
+    .stat{background:var(--s1);padding:2rem;text-align:center}
+    .stat-n{font-size:2.1rem;font-weight:800;background:linear-gradient(150deg,#fff,rgba(255,255,255,.5));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:-.02em}
+    .stat-l{font-size:.75rem;color:var(--txt3);margin-top:4px}
 
-    /* ── PROVIDERS ── */
-    .providers-grid {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 1rem; margin-top: 2rem;
-    }
-    .provider-card {
-      background: white; border: 1px solid var(--border);
-      border-radius: 12px; padding: 1.2rem 1.5rem;
-      display: flex; align-items: center; gap: 12px;
-    }
-    .provider-card .picon {
-      width: 36px; height: 36px; border-radius: 8px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 1.1rem; flex-shrink: 0; background: var(--bg);
-    }
-    .provider-card .pname { font-size: 0.875rem; font-weight: 600; }
-    .provider-card .pdesc { font-size: 0.75rem; color: var(--muted); }
+    /* ─── ROUTE CHAIN ─── */
+    .rchain{border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+    .rstep{display:flex;align-items:center;gap:1.5rem;padding:1.3rem 1.8rem;background:var(--s1);border-bottom:1px solid var(--border);transition:background .2s;cursor:default}
+    .rstep:last-child{border-bottom:none}
+    .rstep:hover{background:var(--s2)}
+    .rnum{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-size:.75rem;font-weight:800;flex-shrink:0;border:1px solid}
+    .rn1{background:rgba(99,102,241,.12);border-color:rgba(99,102,241,.35);color:#818cf8}
+    .rn2{background:rgba(168,85,247,.12);border-color:rgba(168,85,247,.35);color:#c084fc}
+    .rn3{background:rgba(16,185,129,.12);border-color:rgba(16,185,129,.35);color:#34d399}
+    .rn4{background:rgba(251,191,36,.12);border-color:rgba(251,191,36,.35);color:#fbbf24}
+    .rn5{background:rgba(100,116,139,.1);border-color:rgba(100,116,139,.3);color:#64748b}
+    .rc{flex:1}
+    .rt{font-size:.88rem;font-weight:700;margin-bottom:.2rem}
+    .rd{font-size:.8rem;color:var(--txt2)}
+    .rbadge{font-size:.68rem;font-weight:600;padding:2px 10px;border-radius:100px;border:1px solid;flex-shrink:0}
+    .rb-new{background:rgba(52,211,153,.08);border-color:rgba(52,211,153,.28);color:#34d399}
+    .rb-stb{background:rgba(148,163,184,.06);border-color:rgba(148,163,184,.18);color:#475569}
+    .rfallback{display:flex;align-items:center;padding:5px 4rem;gap:10px}
+    .rfline{width:1px;height:22px;background:var(--border);margin:0 16px;flex-shrink:0;position:relative}
+    .rfline::after{content:'▼';position:absolute;bottom:-12px;left:50%;transform:translateX(-50%);font-size:7px;color:var(--txt3)}
+    .rfcond{font-size:.7rem;color:var(--txt3);padding:3px 10px;border-radius:100px;background:rgba(255,255,255,.025);border:1px solid var(--border)}
 
-    /* ── ADMIN PANEL MOCKUP ── */
-    .panel-mockup {
-      background: #1e293b;
-      border-radius: var(--radius);
-      overflow: hidden;
-      box-shadow: 0 24px 80px rgba(0,0,0,.3);
-      margin-top: 2.5rem;
-    }
-    .panel-topbar {
-      background: #0f172a;
-      display: flex; align-items: center; gap: 8px;
-      padding: 10px 16px; border-bottom: 1px solid #334155;
-    }
-    .panel-dot { width: 10px; height: 10px; border-radius: 50%; }
-    .pd-r { background: #ff5f56; }
-    .pd-y { background: #ffbd2e; }
-    .pd-g { background: #27c93f; }
-    .panel-url { color: #475569; font-size: 0.75rem; margin-left: 8px; font-family: monospace; }
-    .panel-body { display: flex; height: 340px; }
-    .panel-sidebar {
-      width: 140px; flex-shrink: 0;
-      background: #1e293b;
-      border-right: 1px solid #334155;
-      padding: 1rem 0;
-    }
-    .ps-item {
-      padding: 7px 16px; font-size: 0.78rem; cursor: default;
-      display: flex; align-items: center; gap: 8px; color: #64748b;
-    }
-    .ps-item.active {
-      background: rgba(99,102,241,.15);
-      color: #818cf8; font-weight: 600;
-      border-right: 2px solid #6366f1;
-    }
-    .panel-content { flex: 1; padding: 1.5rem; overflow: hidden; }
-    .pc-title { color: #e2e8f0; font-size: 0.875rem; font-weight: 700; margin-bottom: 1rem; }
-    .pc-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 1rem; }
-    .pc-card {
-      background: #0f172a; border: 1px solid #334155;
-      border-radius: 10px; padding: 12px;
-    }
-    .pc-card-num { font-size: 1.3rem; font-weight: 800; color: #818cf8; }
-    .pc-card-lbl { font-size: 0.7rem; color: #64748b; margin-top: 2px; }
-    .pc-bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-    .pc-bar-lbl { font-size: 0.7rem; color: #94a3b8; width: 60px; flex-shrink: 0; }
-    .pc-bar-bg { flex: 1; height: 6px; background: #1e293b; border-radius: 3px; overflow: hidden; }
-    .pc-bar-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, #6366f1, #818cf8); }
-    .pc-bar-val { font-size: 0.7rem; color: #475569; width: 36px; text-align: right; }
+    /* ─── QUICKSTART ─── */
+    .qs-wrap{border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+    .qs-tabs{display:flex;background:var(--s1);border-bottom:1px solid var(--border)}
+    .qs-tab{padding:11px 22px;font-size:.8rem;font-weight:600;cursor:pointer;color:var(--txt3);border-right:1px solid var(--border);transition:color .15s,background .15s;user-select:none}
+    .qs-tab:hover{color:var(--txt2);background:rgba(255,255,255,.03)}
+    .qs-tab.active{color:var(--txt);background:var(--s2)}
+    .qs-content{display:none}
+    .qs-content.active{display:block}
+    .qs-hdr{display:flex;align-items:center;justify-content:flex-end;padding:8px 16px;background:var(--s1);border-bottom:1px solid var(--border)}
+    .copy-btn{background:rgba(255,255,255,.05);color:var(--txt3);border:1px solid var(--border);padding:4px 12px;border-radius:6px;font-size:.7rem;cursor:pointer;transition:all .15s;font-family:inherit}
+    .copy-btn:hover{background:rgba(255,255,255,.1);color:var(--txt2);border-color:var(--border-h)}
+    .copy-btn.copied{background:rgba(52,211,153,.08);color:#34d399;border-color:rgba(52,211,153,.28)}
+    .qs-body{background:var(--s2);padding:1.8rem 2rem;font-family:'SF Mono','Fira Code','Consolas',monospace;font-size:.82rem;line-height:1.95;overflow-x:auto}
+    .cc{color:#374151}.cm{color:#e2e8f0}.cf{color:#818cf8}.cv{color:#fbbf24}.ce{color:#34d399}
 
-    /* ── CALLOUT ── */
-    .callout {
-      background: linear-gradient(135deg, #6366f1 0%, #4338ca 100%);
-      border-radius: var(--radius);
-      padding: 3.5rem 3rem;
-      text-align: center; color: white;
-      margin: 3rem auto; max-width: 800px;
-    }
-    .callout h2 { color: white; font-size: 1.8rem; margin-bottom: 0.75rem; }
-    .callout p { color: rgba(255,255,255,.8); margin-bottom: 2rem; font-size: 1rem; }
-    .callout .cta-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+    /* ─── PROVIDERS ─── */
+    .pgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:1px;background:var(--border);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+    .pcard{background:var(--s1);padding:1.8rem;display:flex;align-items:center;gap:14px;transition:background .2s;cursor:default}
+    .pcard:hover{background:var(--s2)}
+    .pname{font-weight:700;font-size:.88rem}
+    .pdesc{font-size:.75rem;color:var(--txt3);margin-top:2px}
 
-    /* ── FOOTER ── */
-    footer {
-      background: var(--code-bg);
-      color: #475569; font-size: 0.8rem;
-      padding: 2rem; text-align: center;
-      border-top: 1px solid #1e293b;
-    }
-    footer a { color: #6366f1; text-decoration: none; }
+    /* ─── CTA ─── */
+    .cta{border-top:1px solid var(--border);padding:8rem 2rem;text-align:center;background:radial-gradient(ellipse 60% 50% at 50% 100%,rgba(99,102,241,.08),transparent)}
+    .cta h2{font-size:clamp(2rem,4vw,3.2rem);font-weight:800;letter-spacing:-.03em;margin-bottom:1rem}
+    .cta p{font-size:1rem;color:var(--txt2);margin-bottom:2.5rem}
+    .cta-row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
 
-    /* ── RESPONSIVE ── */
-    @media (max-width: 640px) {
-      .metrics-bar { gap: 1.5rem; }
-      .panel-body { height: auto; flex-direction: column; }
-      .panel-sidebar { width: 100%; border-right: none; border-bottom: 1px solid #334155; display: flex; flex-wrap: wrap; padding: 0.5rem; }
-      .ps-item { padding: 6px 10px; }
-      .nav-links { display: none; }
+    /* ─── FOOTER ─── */
+    footer{border-top:1px solid var(--border);padding:2rem;text-align:center;font-size:.78rem;color:var(--txt3)}
+    footer a{color:var(--txt3);text-decoration:none;transition:color .15s}
+    footer a:hover{color:var(--txt2)}
+
+    /* ─── SCROLL ANIM ─── */
+    .fu{opacity:0;transform:translateY(28px);transition:opacity .65s ease,transform .65s ease}
+    .fu.vis{opacity:1;transform:translateY(0)}
+    .fu.d1{transition-delay:.1s}.fu.d2{transition-delay:.2s}.fu.d3{transition-delay:.3s}
+
+    /* ─── RESPONSIVE ─── */
+    @media(max-width:768px){
+      .nav-links{display:none}
+      .bento{grid-template-columns:1fr}
+      .bc.w2{grid-column:span 1}
+      .stats{grid-template-columns:repeat(2,1fr);padding:0 1.5rem}
+      .hero{padding:100px 1.5rem 60px}
     }
   </style>
 </head>
 <body>
 
-<!-- ═══ NAV ═══ -->
-<nav>
+<!-- NAV -->
+<nav id="nav">
   <a href="#" class="nav-logo">
     <div class="nav-logo-icon">🌉</div>
     <span class="nav-logo-text">Bridge Server</span>
   </a>
-  <ul class="nav-links">
-    <li><a href="#features">功能</a></li>
-    <li><a href="#routing">路由</a></li>
-    <li><a href="#quickstart">快速开始</a></li>
-    <li><a href="#providers">支持平台</a></li>
-  </ul>
-  <a href="https://github.com/qiannj/bridge-server" class="nav-cta">GitHub →</a>
+  <div class="nav-links">
+    <a href="#features">功能</a>
+    <a href="#routing">路由</a>
+    <a href="#quickstart">快速开始</a>
+    <a href="#providers">平台</a>
+  </div>
+  <div class="nav-right">
+    <a href="#quickstart" class="btn-ghost">文档</a>
+    <a href="https://github.com/qiannj/bridge-server" class="btn-solid">GitHub →</a>
+  </div>
 </nav>
 
-<!-- ═══ HERO ═══ -->
-<div class="hero">
-  <div class="hero-badge">✨ v2.2 · OpenAI Compatible</div>
-  <h1>一个网关，<span>接入所有 AI</span></h1>
-  <p>Bridge Server 将 DashScope、MiniMax、Moonshot、OpenAI 等多个大模型平台统一为单一 OpenAI 兼容接口，让你的 AI Agent 无缝切换模型，智能路由、成本可控。</p>
+<!-- HERO -->
+<section class="hero">
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+
+  <div class="hero-badge">
+    <div class="badge-dot"></div>
+    OpenAI Compatible · 多 Provider 统一网关
+  </div>
+
+  <h1 class="hero-title">
+    <span class="gt">一个接口</span><br>
+    <span class="at">接入所有 AI</span>
+  </h1>
+
+  <p class="hero-sub">
+    将 DashScope、MiniMax、Moonshot、OpenAI 等多平台统一为单一 OpenAI 兼容接口。智能路由、成本可控、异常兜底，让你的 AI Agent 无缝切换任何模型。
+  </p>
+
   <div class="hero-actions">
-    <a href="#quickstart" class="btn-primary">🚀 5 分钟上手</a>
-    <a href="https://github.com/qiannj/bridge-server" class="btn-secondary">⭐ GitHub</a>
+    <a href="#quickstart" class="btn-cta">🚀 5 分钟上手</a>
+    <a href="https://github.com/qiannj/bridge-server" class="btn-outline">⭐ GitHub</a>
   </div>
-</div>
 
-<!-- ═══ METRICS BAR ═══ -->
-<div class="metrics-bar">
-  <div class="metric"><div class="metric-num">OpenAI</div><div class="metric-label">100% 兼容接口</div></div>
-  <div class="metric"><div class="metric-num">4+</div><div class="metric-label">主流 AI 平台</div></div>
-  <div class="metric"><div class="metric-num">5 层</div><div class="metric-label">智能路由优先级</div></div>
-  <div class="metric"><div class="metric-num">零改动</div><div class="metric-label">客户端迁移成本</div></div>
-  <div class="metric"><div class="metric-num">实时</div><div class="metric-label">流式 + 空回合兜底</div></div>
-</div>
-
-<!-- ═══ PROBLEM ═══ -->
-<section id="problem">
-  <div class="section-tag">为什么需要它</div>
-  <h2>直连多个 AI 平台的三大痛点</h2>
-  <p class="section-sub">每个平台都有自己的 SDK、认证方式和接口格式，维护成本随平台数量指数增长。</p>
-  <div class="problem-grid">
-    <div class="problem-card">
-      <div class="icon">🔌</div>
-      <h3>接入复杂</h3>
-      <p>DashScope、MiniMax、Moonshot 各自的 API 格式不一致，切换平台需要大量改动客户端代码，新增 Provider 成本极高。</p>
+  <div class="terminal">
+    <div class="t-bar">
+      <div class="t-dot t-r"></div><div class="t-dot t-y"></div><div class="t-dot t-g"></div>
+      <span class="t-title">POST /v1/chat/completions — Bridge Server</span>
     </div>
-    <div class="problem-card">
-      <div class="icon">💸</div>
-      <h3>成本不可控</h3>
-      <p>不知道每次请求实际落到哪个模型，简单问候误用昂贵推理模型，缺少统一的用量视图和预算控制。</p>
-    </div>
-    <div class="problem-card">
-      <div class="icon">🔇</div>
-      <h3>上游异常难兜底</h3>
-      <p>上游偶发的空回合（reasoning-only stop）、流式中断会直接透传给 Agent，导致「Agent couldn't generate a response」等难排查问题。</p>
-    </div>
-  </div>
-  <div class="arrow-row">
-    <div class="arrow-chip">Bridge Server</div>
-    <span class="arrow">→</span>
-    <div class="arrow-chip">统一接口 · 智能路由 · 异常兜底 · 成本可视</div>
-  </div>
-</section>
-
-<!-- ═══ FEATURES ═══ -->
-<div id="features">
-<div class="inner">
-  <div class="section-tag">核心功能</div>
-  <h2>不只是转发，更是智能适配层</h2>
-  <p class="section-sub">从协议归一到 LLM 智能路由，Bridge Server 把零散的 AI 平台管理变成统一可控的工程能力。</p>
-  <div class="features-grid">
-
-    <div class="feature-card">
-      <div class="feat-icon feat-purple">🔀</div>
-      <h3>五层智能路由</h3>
-      <p>按优先级依次：客户端直接指定 → 旁路 LLM 路由器 → 代码插件路由器 → 场景正则路由 → ProviderManager 兜底，每层失败自动降级，路由决策全程可观测。</p>
-      <div class="feat-tags">
-        <span class="feat-tag">SmartRouter</span>
-        <span class="feat-tag">BypassRouter</span>
-        <span class="feat-tag">插件路由器</span>
-      </div>
-    </div>
-
-    <div class="feature-card">
-      <div class="feat-icon feat-blue">🧠</div>
-      <h3>旁路模型路由器</h3>
-      <p>指定一个轻量 LLM 作为路由大脑，用自然语言描述路由规则，让 AI 决定每次请求应该交给哪个模型处理。超过阈值时还可自动压缩历史上下文。</p>
-      <div class="feat-tags">
-        <span class="feat-tag">LLM 路由决策</span>
-        <span class="feat-tag">上下文压缩</span>
-        <span class="feat-tag">超时降级</span>
-      </div>
-    </div>
-
-    <div class="feature-card">
-      <div class="feat-icon feat-green">🛡️</div>
-      <h3>空回合三层兜底</h3>
-      <p>自动检测 reasoning-only stop、空 delta 等异常空回合，先尝试单次 non-stream 重试（附加强制回复提示词），仍失败则返回最小可见文本，不透传空响应给 Agent。</p>
-      <div class="feat-tags">
-        <span class="feat-tag">工具 follow-up 感知</span>
-        <span class="feat-tag">自动重试</span>
-        <span class="feat-tag">结构化日志</span>
-      </div>
-    </div>
-
-    <div class="feature-card">
-      <div class="feat-icon feat-amber">⚡</div>
-      <h3>流式异常自动降级</h3>
-      <p>流式请求在内容发送前失败时，自动降级为非流式调用并转换为 SSE 格式输出，客户端完全无感知。流式工具调用结构化解析，兼容 XML 格式工具调用。</p>
-      <div class="feat-tags">
-        <span class="feat-tag">stream→非流式 fallback</span>
-        <span class="feat-tag">tool_call 转换</span>
-      </div>
-    </div>
-
-    <div class="feature-card">
-      <div class="feat-icon feat-rose">📊</div>
-      <h3>可视化管理面板</h3>
-      <p>内置 Web 管理面板，支持 Provider 管理、路由配置、用量统计、降本看板、日志查看、系统更新、外部 API Key 管理等全部运营功能。单文件 Alpine.js 实现，无构建步骤。</p>
-      <div class="feat-tags">
-        <span class="feat-tag">实时监控</span>
-        <span class="feat-tag">成本分析</span>
-        <span class="feat-tag">热重载配置</span>
-      </div>
-    </div>
-
-    <div class="feature-card">
-      <div class="feat-icon feat-cyan">🧪</div>
-      <h3>模型能力基准测试</h3>
-      <p>覆盖代码编程、数学推理、文学创作、语言翻译、日常对话五个维度，添加模型后一键发起测试，结果展示星级评分，帮助快速选出最适合业务的模型。</p>
-      <div class="feat-tags">
-        <span class="feat-tag">5 维度评分</span>
-        <span class="feat-tag">Token 用量预估</span>
-        <span class="feat-tag">Setup Wizard 集成</span>
-      </div>
-    </div>
-
-  </div>
-</div>
-</div>
-
-<!-- ═══ ROUTING ═══ -->
-<section id="routing">
-  <div class="section-tag">路由架构</div>
-  <h2>五层优先级路由链</h2>
-  <p class="section-sub">每一层独立决策，失败时自动传递给下一层，保证每个请求都能得到最合适的响应。</p>
-
-  <div class="routing-flow">
-    <div class="rf-title">▸ 路由决策流程 — /v1/chat/completions</div>
-
-    <div class="rf-line">
-      <span class="rf-num">①</span>
-      <span class="rf-badge rb-direct">直接指定</span>
-      <span class="rf-desc"> model="dashscope/qwen3-coder-plus" — confidence 1.0，直达，跳过所有路由</span>
-    </div>
-    <div class="rf-fallback">↓ model 为空 / "smart"</div>
-
-    <div class="rf-line">
-      <span class="rf-num">②</span>
-      <span class="rf-badge rb-bypass">旁路路由器</span>
-      <span class="rf-desc"> LLM 智能决策 + 上下文压缩 <span class="rf-tag-new">NEW</span></span>
-    </div>
-    <div class="rf-fallback">↓ 未启用 / 超时 / 决策失败</div>
-
-    <div class="rf-line">
-      <span class="rf-num">③</span>
-      <span class="rf-badge rb-plugin">插件路由器</span>
-      <span class="rf-desc"> 用户 Python 插件，300ms 沙箱执行 <span class="rf-tag-new">NEW</span></span>
-    </div>
-    <div class="rf-fallback">↓ 无激活插件 / 执行失败</div>
-
-    <div class="rf-line">
-      <span class="rf-num">④</span>
-      <span class="rf-badge rb-smart">场景路由</span>
-      <span class="rf-desc"> 正则匹配 coding/writing/translation 等场景，支持优先级和排除规则</span>
-    </div>
-    <div class="rf-fallback">↓ 无匹配场景</div>
-
-    <div class="rf-line">
-      <span class="rf-num">⑤</span>
-      <span class="rf-badge rb-default">ProviderManager</span>
-      <span class="rf-desc"> 按 fallback / round_robin / cost_optimized / lowest_latency 策略兜底</span>
+    <div class="t-body">
+      <div><span class="tc-prompt">$ </span><span class="tc-cmd">curl -X POST http://localhost:19377/v1/chat/completions \</span></div>
+      <div><span class="tc-cmd">    -d '{"model":"smart","messages":[{"role":"user","content":"用 Python 实现快排"}]}'</span></div>
+      <div>&nbsp;</div>
+      <div><span class="tc-meta">→ [旁路路由器] 识别场景: </span><span class="tc-val">coding</span></div>
+      <div><span class="tc-meta">→ [路由结果]   </span><span class="tc-route">dashscope / qwen3-coder-plus</span><span class="tc-meta">  (11ms)</span></div>
+      <div>&nbsp;</div>
+      <div><span class="tc-key">"choices"</span><span class="tc-cmd">: [{</span><span class="tc-key">"message"</span><span class="tc-cmd">: {</span><span class="tc-key">"role"</span><span class="tc-cmd">:</span><span class="tc-str">"assistant"</span><span class="tc-cmd">,</span></div>
+      <div><span class="tc-key">  "content"</span><span class="tc-cmd">: </span><span class="tc-str">"```python\ndef quicksort(arr): ..."</span><span class="tc-cmd">},</span></div>
+      <div><span class="tc-key">  "finish_reason"</span><span class="tc-cmd">: </span><span class="tc-str">"stop"</span><span class="tc-cmd">}]</span><span class="t-cursor"></span></div>
     </div>
   </div>
 </section>
 
-<!-- ═══ ADMIN PANEL MOCKUP ═══ -->
-<section style="padding-top: 0;">
-  <div class="section-tag">管理面板</div>
-  <h2>开箱即用的可视化控制台</h2>
-  <p class="section-sub">内置 Web 管理面板，无需额外部署，访问 <code style="background:var(--brand-light);color:var(--brand-dark);padding:2px 8px;border-radius:6px;">http://localhost:19377</code> 即可使用。</p>
+<!-- COMPAT STRIP -->
+<div class="compat">
+  <div class="compat-lbl">兼容所有 OpenAI 客户端，无需修改任何代码</div>
+  <div class="compat-row">
+    <div class="compat-item">🤖 OpenClaw</div>
+    <div class="compat-item">⌨️ Cursor</div>
+    <div class="compat-item">💬 Continue</div>
+    <div class="compat-item">🔗 LangChain</div>
+    <div class="compat-item">🐍 OpenAI SDK</div>
+    <div class="compat-item">📝 VS Code Copilot</div>
+    <div class="compat-item">📡 任意 OpenAI 兼容客户端</div>
+  </div>
+</div>
 
-  <div class="panel-mockup">
-    <div class="panel-topbar">
-      <div class="panel-dot pd-r"></div>
-      <div class="panel-dot pd-y"></div>
-      <div class="panel-dot pd-g"></div>
-      <span class="panel-url">http://localhost:19377 — Bridge Server 管理面板</span>
+<!-- FEATURES -->
+<section class="section" id="features">
+  <div class="s-label fu">核心能力</div>
+  <h2 class="s-title fu d1">不只是转发，更是智能适配层</h2>
+  <p class="s-desc fu d2">从协议归一到 LLM 智能路由，把零散的 AI 平台整合成统一可控的工程能力。</p>
+
+  <div class="bento fu d3">
+    <div class="bc w2">
+      <div class="bc-icon">🔀</div>
+      <div class="bc-title">五层智能路由优先级链</div>
+      <div class="bc-desc">客户端直指 → 旁路 LLM 路由器 → 代码插件路由器 → 场景正则匹配 → ProviderManager 兜底。每层失败自动降级，路由决策全程结构化日志，完全可观测。</div>
+      <div class="bc-tags">
+        <span class="bc-tag">SmartRouter</span>
+        <span class="bc-tag">BypassRouter</span>
+        <span class="bc-tag">Python Plugin</span>
+        <span class="bc-tag">ProviderManager</span>
+      </div>
     </div>
-    <div class="panel-body">
-      <div class="panel-sidebar">
-        <div class="ps-item active" onclick="panelNav(this)">📊 仪表盘</div>
-        <div class="ps-item" onclick="panelNav(this)">🔌 Providers</div>
-        <div class="ps-item" onclick="panelNav(this)">🔀 路由配置</div>
-        <div class="ps-item" onclick="panelNav(this)">🧠 旁路路由器</div>
-        <div class="ps-item" onclick="panelNav(this)">📈 用量统计</div>
-        <div class="ps-item" onclick="panelNav(this)">💰 降本看板</div>
-        <div class="ps-item" onclick="panelNav(this)">📋 日志</div>
-        <div class="ps-item" onclick="panelNav(this)">⚙️ 系统</div>
-      </div>
-      <div class="panel-content">
-        <div class="pc-title">今日概览</div>
-        <div class="pc-cards">
-          <div class="pc-card">
-            <div class="pc-card-num">1,247</div>
-            <div class="pc-card-lbl">今日请求</div>
-          </div>
-          <div class="pc-card">
-            <div class="pc-card-num" style="color:#34d399;">¥3.82</div>
-            <div class="pc-card-lbl">节省费用</div>
-          </div>
-          <div class="pc-card">
-            <div class="pc-card-num" style="color:#f59e0b;">99.8%</div>
-            <div class="pc-card-lbl">成功率</div>
-          </div>
-        </div>
-        <div style="margin-top:1.2rem;">
-          <div style="font-size:0.72rem;color:#475569;margin-bottom:8px;">路由分布</div>
-          <div class="pc-bar-row">
-            <span class="pc-bar-lbl">场景路由</span>
-            <div class="pc-bar-bg"><div class="pc-bar-fill" style="width:68%;"></div></div>
-            <span class="pc-bar-val">68%</span>
-          </div>
-          <div class="pc-bar-row">
-            <span class="pc-bar-lbl">旁路路由</span>
-            <div class="pc-bar-bg"><div class="pc-bar-fill" style="width:21%;background:linear-gradient(90deg,#7c3aed,#a78bfa);"></div></div>
-            <span class="pc-bar-val">21%</span>
-          </div>
-          <div class="pc-bar-row">
-            <span class="pc-bar-lbl">直接指定</span>
-            <div class="pc-bar-bg"><div class="pc-bar-fill" style="width:11%;background:linear-gradient(90deg,#0891b2,#22d3ee);"></div></div>
-            <span class="pc-bar-val">11%</span>
-          </div>
-          <div style="margin-top:1.2rem;padding-top:1rem;border-top:1px solid #334155;display:flex;gap:8px;flex-wrap:wrap;">
-            <div style="background:#14532d;color:#4ade80;font-size:0.7rem;padding:3px 10px;border-radius:6px;">● dashscope 正常</div>
-            <div style="background:#14532d;color:#4ade80;font-size:0.7rem;padding:3px 10px;border-radius:6px;">● moonshot 正常</div>
-            <div style="background:#14532d;color:#4ade80;font-size:0.7rem;padding:3px 10px;border-radius:6px;">● nvidia 正常</div>
-          </div>
-        </div>
-      </div>
+    <div class="bc">
+      <div class="bc-icon">🧠</div>
+      <div class="bc-title">旁路 LLM 路由器</div>
+      <div class="bc-desc">指定一个轻量模型作为路由大脑，用自然语言描述路由规则，超过阈值时自动压缩历史上下文再转发。</div>
+      <div class="bc-tags"><span class="bc-tag bc-new">NEW</span><span class="bc-tag">上下文压缩</span><span class="bc-tag">超时降级</span></div>
+    </div>
+    <div class="bc">
+      <div class="bc-icon">🛡️</div>
+      <div class="bc-title">空回合三层兜底</div>
+      <div class="bc-desc">自动检测 reasoning-only stop 和空 delta 异常，先单次非流式重试，仍失败则返回最小可见文本，不透传空响应给 Agent。</div>
+      <div class="bc-tags"><span class="bc-tag bc-new">NEW</span><span class="bc-tag">工具回合感知</span></div>
+    </div>
+    <div class="bc">
+      <div class="bc-icon">⚡</div>
+      <div class="bc-title">流式异常自动降级</div>
+      <div class="bc-desc">流式请求在内容输出前失败时，自动降级为非流式调用并转换为 SSE 格式，客户端完全无感知。支持 XML 工具调用结构化解析。</div>
+      <div class="bc-tags"><span class="bc-tag">stream fallback</span><span class="bc-tag">tool_call 转换</span></div>
+    </div>
+    <div class="bc">
+      <div class="bc-icon">📊</div>
+      <div class="bc-title">可视化管理面板</div>
+      <div class="bc-desc">内置 Web Admin，Provider 管理、路由配置、用量统计、降本看板、日志查看一站式搞定。Alpine.js 单文件，无构建步骤。</div>
+      <div class="bc-tags"><span class="bc-tag">热重载</span><span class="bc-tag">实时监控</span><span class="bc-tag">成本分析</span></div>
+    </div>
+    <div class="bc">
+      <div class="bc-icon">🧪</div>
+      <div class="bc-title">模型基准测试</div>
+      <div class="bc-desc">覆盖代码、数学、创作、翻译、对话五个维度，添加模型后一键测试，星级评分帮你选出最适合业务的模型。</div>
+      <div class="bc-tags"><span class="bc-tag">5 维度评分</span><span class="bc-tag">Setup Wizard</span></div>
     </div>
   </div>
 </section>
 
-<!-- ═══ QUICKSTART ═══ -->
-<section id="quickstart" style="background:white;max-width:100%;padding:5rem 2rem;">
-<div style="max-width:1100px;margin:0 auto;">
-  <div class="section-tag">快速开始</div>
-  <h2>5 分钟完成部署</h2>
-  <p class="section-sub">选择最适合你的安装方式，安装后访问 <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;">http://localhost:19377</code> 进入管理面板。</p>
-
-  <div class="tabs" id="qs-tabs">
-    <div class="tab active" onclick="switchTab(0)">pip 直接运行</div>
-    <div class="tab" onclick="switchTab(1)">Setup Wizard</div>
-    <div class="tab" onclick="switchTab(2)">Docker</div>
+<!-- STATS -->
+<div style="max-width:1100px;margin:0 auto;padding:0 2rem;" class="fu">
+  <div class="stats" style="max-width:100%;padding:0;margin:0">
+    <div class="stat"><div class="stat-n">100%</div><div class="stat-l">OpenAI 接口兼容</div></div>
+    <div class="stat"><div class="stat-n">5 层</div><div class="stat-l">智能路由优先级</div></div>
+    <div class="stat"><div class="stat-n">4+</div><div class="stat-l">主流 AI 平台</div></div>
+    <div class="stat"><div class="stat-n">零改动</div><div class="stat-l">客户端迁移成本</div></div>
   </div>
+</div>
 
-  <!-- Tab 0: pip -->
-  <div class="tab-content active" id="tab-0">
-    <div class="code-area">
-      <div class="code-header">
-        <div class="code-dots">
-          <span class="cd-red"></span><span class="cd-yellow"></span><span class="cd-green"></span>
-        </div>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <span class="code-lang">bash</span>
-          <button class="copy-btn" onclick="copyCode(this,'tab-0')">复制</button>
-        </div>
+<!-- ROUTING -->
+<section class="section" id="routing">
+  <div class="s-label fu">路由架构</div>
+  <h2 class="s-title fu d1">五层优先级路由链</h2>
+  <p class="s-desc fu d2">每一层独立决策，失败时自动传递给下一层，保证每个请求都能得到最合适的响应。</p>
+
+  <div class="rchain fu d3">
+    <div class="rstep">
+      <div class="rnum rn1">①</div>
+      <div class="rc">
+        <div class="rt">客户端直接指定</div>
+        <div class="rd"><code style="color:#a5b4fc;font-size:.79rem;">model="dashscope/qwen3-coder-plus"</code> — confidence 1.0，直达目标，跳过所有路由层</div>
       </div>
-      <div class="code-body" data-code="# 1. 安装
-pip install bridge-server
+      <span class="rbadge rb-stb">stable</span>
+    </div>
+    <div class="rfallback"><div class="rfline"></div><span class="rfcond">↓ model 为空 / "smart"</span></div>
 
-# 2. 设置 API Key（至少一个 Provider）
+    <div class="rstep">
+      <div class="rnum rn2">②</div>
+      <div class="rc">
+        <div class="rt">旁路 LLM 路由器</div>
+        <div class="rd">指定轻量模型作为路由大脑，自然语言规则，支持上下文压缩，超时自动降级</div>
+      </div>
+      <span class="rbadge rb-new">NEW</span>
+    </div>
+    <div class="rfallback"><div class="rfline"></div><span class="rfcond">↓ 未启用 / 超时 / 决策失败</span></div>
+
+    <div class="rstep">
+      <div class="rnum rn3">③</div>
+      <div class="rc">
+        <div class="rt">代码插件路由器</div>
+        <div class="rd">用户自定义 Python 插件，300ms 沙箱执行，完全可编程</div>
+      </div>
+      <span class="rbadge rb-new">NEW</span>
+    </div>
+    <div class="rfallback"><div class="rfline"></div><span class="rfcond">↓ 无激活插件 / 执行失败</span></div>
+
+    <div class="rstep">
+      <div class="rnum rn4">④</div>
+      <div class="rc">
+        <div class="rt">场景正则路由</div>
+        <div class="rd">正则匹配 coding / writing / translation 等场景，支持优先级和排除规则</div>
+      </div>
+      <span class="rbadge rb-stb">stable</span>
+    </div>
+    <div class="rfallback"><div class="rfline"></div><span class="rfcond">↓ 无匹配场景</span></div>
+
+    <div class="rstep">
+      <div class="rnum rn5">⑤</div>
+      <div class="rc">
+        <div class="rt">ProviderManager 兜底</div>
+        <div class="rd">按 fallback / round_robin / cost_optimized / lowest_latency 策略选择最优 Provider</div>
+      </div>
+      <span class="rbadge rb-stb">stable</span>
+    </div>
+  </div>
+</section>
+
+<!-- QUICKSTART -->
+<section style="background:var(--s1);border-top:1px solid var(--border);border-bottom:1px solid var(--border);padding:7rem 2rem" id="quickstart">
+  <div style="max-width:1100px;margin:0 auto">
+    <div class="s-label fu">快速开始</div>
+    <h2 class="s-title fu d1">5 分钟完成部署</h2>
+    <p class="s-desc fu d2">选择最适合你的安装方式，安装后访问 <code style="background:rgba(255,255,255,.06);padding:1px 7px;border-radius:5px;font-size:.9em;">http://localhost:19377</code> 进入管理面板。</p>
+
+    <div class="qs-wrap fu d3">
+      <div class="qs-tabs" id="qs-tabs">
+        <div class="qs-tab active" onclick="switchTab(0)">pip 直接运行</div>
+        <div class="qs-tab" onclick="switchTab(1)">Setup Wizard</div>
+        <div class="qs-tab" onclick="switchTab(2)">Docker</div>
+      </div>
+
+      <div class="qs-content active" id="qs-0">
+        <div class="qs-hdr"><button class="copy-btn" onclick="copyCode(this,'qs-0')">复制代码</button></div>
+        <div class="qs-body" data-code="pip install bridge-server
 export DASHSCOPE_API_KEY=sk-xxx
-
-# 3. 启动
 python -m uvicorn bridge_server.runtime:app --app-dir src --port 19377
-
-# 4. 发起第一个请求
-curl -X POST http://127.0.0.1:19377/v1/chat/completions \
-  -H &quot;Authorization: Bearer &lt;your-token&gt;&quot; \
-  -H &quot;Content-Type: application/json&quot; \
-  -d '{&quot;model&quot;:&quot;smart&quot;,&quot;messages&quot;:[{&quot;role&quot;:&quot;user&quot;,&quot;content&quot;:&quot;你好&quot;}]}'">
-        <div><span class="c-gray"># 1. 安装</span></div>
-        <div><span class="c-green">pip</span> <span class="c-white">install bridge-server</span></div>
-        <div>&nbsp;</div>
-        <div><span class="c-gray"># 2. 设置 API Key（至少一个 Provider）</span></div>
-        <div><span class="c-cyan">export</span> <span class="c-yellow">DASHSCOPE_API_KEY</span><span class="c-white">=sk-xxx</span></div>
-        <div>&nbsp;</div>
-        <div><span class="c-gray"># 3. 启动</span></div>
-        <div><span class="c-green">python</span> <span class="c-white">-m uvicorn bridge_server.runtime:app</span> <span class="c-purple">--app-dir</span> <span class="c-white">src</span> <span class="c-purple">--port</span> <span class="c-white">19377</span></div>
-        <div>&nbsp;</div>
-        <div><span class="c-gray"># 4. 发起第一个请求</span></div>
-        <div><span class="c-green">curl</span> <span class="c-white">-X POST http://127.0.0.1:19377/v1/chat/completions</span> <span class="c-orange">\</span></div>
-        <div><span class="c-white">  -H </span><span class="c-yellow">"Authorization: Bearer &lt;your-token&gt;"</span> <span class="c-orange">\</span></div>
-        <div><span class="c-white">  -H </span><span class="c-yellow">"Content-Type: application/json"</span> <span class="c-orange">\</span></div>
-        <div><span class="c-white">  -d </span><span class="c-yellow">'{"model":"smart","messages":[{"role":"user","content":"你好"}]}'</span></div>
-      </div>
-    </div>
-    <div style="margin-top:1.5rem;padding:1rem 1.5rem;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;font-size:0.875rem;color:#166534;">
-      💡 首次启动会自动生成 Admin Token 并打印到控制台，访问 <code>http://localhost:19377</code> 进入管理面板。
-    </div>
-  </div>
-
-  <!-- Tab 1: Setup Wizard -->
-  <div class="tab-content" id="tab-1">
-    <div class="code-area">
-      <div class="code-header">
-        <div class="code-dots">
-          <span class="cd-red"></span><span class="cd-yellow"></span><span class="cd-green"></span>
-        </div>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <span class="code-lang">bash</span>
-          <button class="copy-btn" onclick="copyCode(this,'tab-1')">复制</button>
+curl -X POST http://127.0.0.1:19377/v1/chat/completions -H 'Authorization: Bearer <token>' -H 'Content-Type: application/json' -d '{&quot;model&quot;:&quot;smart&quot;,&quot;messages&quot;:[{&quot;role&quot;:&quot;user&quot;,&quot;content&quot;:&quot;你好&quot;}]}'">
+          <div><span class="cc"># 安装</span></div>
+          <div><span class="cm">pip install bridge-server</span></div>
+          <div>&nbsp;</div>
+          <div><span class="cc"># 设置 API Key（至少一个 Provider）</span></div>
+          <div><span class="ce">export</span> <span class="cm">DASHSCOPE_API_KEY</span>=<span class="cv">sk-xxx</span></div>
+          <div>&nbsp;</div>
+          <div><span class="cc"># 启动</span></div>
+          <div><span class="cm">python -m uvicorn bridge_server.runtime:app</span> <span class="cf">--app-dir</span> src <span class="cf">--port</span> <span class="cv">19377</span></div>
+          <div>&nbsp;</div>
+          <div><span class="cc"># 测试第一个请求</span></div>
+          <div><span class="cm">curl -X POST http://127.0.0.1:19377/v1/chat/completions \</span></div>
+          <div><span class="cm">  -H </span><span class="cv">"Authorization: Bearer &lt;token&gt;"</span> <span class="cm">\</span></div>
+          <div><span class="cm">  -d </span><span class="cv">'{"model":"smart","messages":[{"role":"user","content":"你好"}]}'</span></div>
         </div>
       </div>
-      <div class="code-body" data-code="# 克隆仓库并运行交互式安装向导
-git clone https://github.com/qiannj/bridge-server.git
+
+      <div class="qs-content" id="qs-1">
+        <div class="qs-hdr"><button class="copy-btn" onclick="copyCode(this,'qs-1')">复制代码</button></div>
+        <div class="qs-body" data-code="git clone https://github.com/qiannj/bridge-server.git
+cd bridge-server && pip install -e .
+python -m bridge_server.cli.setup_wizard">
+          <div><span class="cc"># 克隆仓库</span></div>
+          <div><span class="cm">git clone https://github.com/qiannj/bridge-server.git</span></div>
+          <div><span class="cm">cd bridge-server &amp;&amp; pip install -e .</span></div>
+          <div>&nbsp;</div>
+          <div><span class="cc"># 启动交互式 Setup Wizard（引导配置 Provider、路由、认证）</span></div>
+          <div><span class="cm">python -m bridge_server.cli.setup_wizard</span></div>
+          <div>&nbsp;</div>
+          <div><span class="cc"># Wizard 完成后一键启动</span></div>
+          <div><span class="cm">python -m bridge_server.cli.setup_wizard</span> <span class="cf">--start</span></div>
+        </div>
+      </div>
+
+      <div class="qs-content" id="qs-2">
+        <div class="qs-hdr"><button class="copy-btn" onclick="copyCode(this,'qs-2')">复制代码</button></div>
+        <div class="qs-body" data-code="git clone https://github.com/qiannj/bridge-server.git
 cd bridge-server
-pip install -e .
-
-# 启动 Setup Wizard（引导式配置）
-python -m bridge_server.cli.setup_wizard
-
-# Wizard 完成后直接启动
-python -m bridge_server.cli.setup_wizard --start">
-        <div><span class="c-gray"># 克隆仓库并运行交互式安装向导</span></div>
-        <div><span class="c-green">git</span> <span class="c-white">clone https://github.com/qiannj/bridge-server.git</span></div>
-        <div><span class="c-green">cd</span> <span class="c-white">bridge-server</span></div>
-        <div><span class="c-green">pip</span> <span class="c-white">install -e .</span></div>
-        <div>&nbsp;</div>
-        <div><span class="c-gray"># 启动 Setup Wizard（引导式配置）</span></div>
-        <div><span class="c-green">python</span> <span class="c-white">-m bridge_server.cli.setup_wizard</span></div>
-        <div>&nbsp;</div>
-        <div><span class="c-gray"># Wizard 完成后直接启动</span></div>
-        <div><span class="c-green">python</span> <span class="c-white">-m bridge_server.cli.setup_wizard</span> <span class="c-purple">--start</span></div>
-      </div>
-    </div>
-    <div style="margin-top:1.5rem;padding:1rem 1.5rem;background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;font-size:0.875rem;color:#1e40af;">
-      🧙 Setup Wizard 会引导你逐步添加 Provider、设置路由规则、配置认证 Token，并提供模型连接测试和基准性能测试。
-    </div>
-  </div>
-
-  <!-- Tab 2: Docker -->
-  <div class="tab-content" id="tab-2">
-    <div class="code-area">
-      <div class="code-header">
-        <div class="code-dots">
-          <span class="cd-red"></span><span class="cd-yellow"></span><span class="cd-green"></span>
-        </div>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <span class="code-lang">bash</span>
-          <button class="copy-btn" onclick="copyCode(this,'tab-2')">复制</button>
-        </div>
-      </div>
-      <div class="code-body" data-code="# 使用 Docker Compose 启动（包含 Nginx 反向代理）
-git clone https://github.com/qiannj/bridge-server.git
-cd bridge-server
-
-# 复制配置文件并填写 API Key
 cp config.yaml.example config.yaml
-
-# 启动服务
 docker-compose up -d
-
-# 查看日志
 docker-compose logs -f bridge-server">
-        <div><span class="c-gray"># 使用 Docker Compose 启动（包含 Nginx 反向代理）</span></div>
-        <div><span class="c-green">git</span> <span class="c-white">clone https://github.com/qiannj/bridge-server.git</span></div>
-        <div><span class="c-green">cd</span> <span class="c-white">bridge-server</span></div>
-        <div>&nbsp;</div>
-        <div><span class="c-gray"># 复制配置文件并填写 API Key</span></div>
-        <div><span class="c-green">cp</span> <span class="c-white">config.yaml.example config.yaml</span></div>
-        <div>&nbsp;</div>
-        <div><span class="c-gray"># 启动服务</span></div>
-        <div><span class="c-green">docker-compose</span> <span class="c-white">up -d</span></div>
-        <div>&nbsp;</div>
-        <div><span class="c-gray"># 查看日志</span></div>
-        <div><span class="c-green">docker-compose</span> <span class="c-white">logs -f bridge-server</span></div>
+          <div><span class="cc"># 克隆并配置</span></div>
+          <div><span class="cm">git clone https://github.com/qiannj/bridge-server.git</span></div>
+          <div><span class="cm">cd bridge-server</span></div>
+          <div><span class="cm">cp config.yaml.example config.yaml</span>  <span class="cc"># 填写 API Key</span></div>
+          <div>&nbsp;</div>
+          <div><span class="cc"># 启动（含 Nginx 反向代理）</span></div>
+          <div><span class="cm">docker-compose up -d</span></div>
+          <div>&nbsp;</div>
+          <div><span class="cc"># 查看日志</span></div>
+          <div><span class="cm">docker-compose logs -f bridge-server</span></div>
+        </div>
       </div>
     </div>
-    <div style="margin-top:1.5rem;padding:1rem 1.5rem;background:#fdf4ff;border:1px solid #e9d5ff;border-radius:12px;font-size:0.875rem;color:#6b21a8;">
-      🐳 Docker 模式默认在 19377 端口暴露服务，可在 <code>docker-compose.yml</code> 中修改端口映射和持久化挂载路径。
-    </div>
-  </div>
-</div>
-</section>
 
-<!-- ═══ PROVIDERS ═══ -->
-<section id="providers">
-  <div class="section-tag">支持平台</div>
-  <h2>主流 AI 平台开箱即用</h2>
-  <p class="section-sub">内置适配器已处理各平台的认证、格式差异和工具调用转换，新增平台只需填写 Base URL 和 API Key。</p>
-  <div class="providers-grid">
-    <div class="provider-card">
-      <div class="picon">🟠</div>
-      <div><div class="pname">阿里云百炼</div><div class="pdesc">Qwen 系列全线</div></div>
-    </div>
-    <div class="provider-card">
-      <div class="picon">🌙</div>
-      <div><div class="pname">Moonshot (Kimi)</div><div class="pdesc">长文本 / 创意写作</div></div>
-    </div>
-    <div class="provider-card">
-      <div class="picon">🤖</div>
-      <div><div class="pname">MiniMax</div><div class="pdesc">通用 / 工具调用</div></div>
-    </div>
-    <div class="provider-card">
-      <div class="picon">🟢</div>
-      <div><div class="pname">OpenAI</div><div class="pdesc">GPT 系列</div></div>
-    </div>
-    <div class="provider-card">
-      <div class="picon">⚡</div>
-      <div><div class="pname">NVIDIA NIM</div><div class="pdesc">加速推理端点</div></div>
-    </div>
-    <div class="provider-card">
-      <div class="picon">➕</div>
-      <div><div class="pname">自定义 Provider</div><div class="pdesc">任意 OpenAI 兼容接口</div></div>
+    <div style="margin-top:1.2rem;padding:.9rem 1.4rem;background:rgba(52,211,153,.05);border:1px solid rgba(52,211,153,.18);border-radius:10px;font-size:.83rem;color:rgba(52,211,153,.85);">
+      💡 首次启动自动生成 Admin Token 并打印到控制台，管理面板位于 <code>http://localhost:19377</code>
     </div>
   </div>
 </section>
 
-<!-- ═══ CALLOUT ═══ -->
-<div style="padding:0 2rem;">
-<div class="callout">
-  <h2>让你的 AI Agent 不再受平台束缚</h2>
-  <p>一行 Base URL 替换，即可让 Claude、OpenClaw、Cursor 等任意 OpenAI 兼容客户端<br>接入所有已配置的模型，并获得智能路由、成本优化和稳定兜底。</p>
+<!-- PROVIDERS -->
+<section class="section" id="providers">
+  <div class="s-label fu">支持平台</div>
+  <h2 class="s-title fu d1">主流 AI 平台开箱即用</h2>
+  <p class="s-desc fu d2">内置适配器处理各平台认证、格式差异和工具调用转换，新增 Provider 只需填写 Base URL 和 API Key。</p>
+  <div class="pgrid fu d3">
+    <div class="pcard"><span style="font-size:1.5rem">🟠</span><div><div class="pname">阿里云百炼</div><div class="pdesc">Qwen 系列全线</div></div></div>
+    <div class="pcard"><span style="font-size:1.5rem">🌙</span><div><div class="pname">Moonshot (Kimi)</div><div class="pdesc">长文本 / 创意写作</div></div></div>
+    <div class="pcard"><span style="font-size:1.5rem">🤖</span><div><div class="pname">MiniMax</div><div class="pdesc">通用 / 工具调用</div></div></div>
+    <div class="pcard"><span style="font-size:1.5rem">🟢</span><div><div class="pname">OpenAI</div><div class="pdesc">GPT 系列</div></div></div>
+    <div class="pcard"><span style="font-size:1.5rem">⚡</span><div><div class="pname">NVIDIA NIM</div><div class="pdesc">加速推理端点</div></div></div>
+    <div class="pcard"><span style="font-size:1.5rem">➕</span><div><div class="pname">自定义 Provider</div><div class="pdesc">任意 OpenAI 兼容接口</div></div></div>
+  </div>
+</section>
+
+<!-- CTA -->
+<div class="cta">
+  <h2>让你的 AI Agent<br>不再受平台束缚</h2>
+  <p>一行 Base URL 替换，所有 OpenAI 兼容客户端即刻接入全部已配置模型</p>
   <div class="cta-row">
-    <a href="https://github.com/qiannj/bridge-server" class="btn-primary">查看源码 →</a>
-    <a href="#quickstart" class="btn-secondary">立即体验</a>
+    <a href="https://github.com/qiannj/bridge-server" class="btn-cta">查看源码 →</a>
+    <a href="#quickstart" class="btn-outline">立即体验</a>
   </div>
 </div>
-</div>
 
-<!-- ═══ FOOTER ═══ -->
+<!-- FOOTER -->
 <footer>
   <p>Bridge Server · AI 接口统一网关 · AGPL-3.0 License</p>
-  <p style="margin-top:6px;">
+  <p style="margin-top:8px">
     <a href="https://github.com/qiannj/bridge-server">GitHub</a> ·
     <a href="https://github.com/qiannj/bridge-server/blob/main/INSTALL.md">安装文档</a> ·
     <a href="https://github.com/qiannj/bridge-server/blob/main/USAGE.md">使用指南</a> ·
@@ -830,53 +491,36 @@ docker-compose logs -f bridge-server">
 </footer>
 
 <script>
-  // ── Tab switching ──
+  // Tab switching
   function switchTab(idx) {
-    document.querySelectorAll('#qs-tabs .tab').forEach((t, i) => {
-      t.classList.toggle('active', i === idx);
-    });
-    document.querySelectorAll('.tab-content').forEach((c, i) => {
-      c.classList.toggle('active', i === idx);
-    });
+    document.querySelectorAll('#qs-tabs .qs-tab').forEach((t,i) => t.classList.toggle('active', i===idx));
+    document.querySelectorAll('.qs-content').forEach((c,i) => c.classList.toggle('active', i===idx));
   }
 
-  // ── Copy code ──
-  function copyCode(btn, tabId) {
-    const body = document.querySelector('#' + tabId + ' .code-body');
+  // Copy code
+  function copyCode(btn, id) {
+    const body = document.querySelector('#' + id + ' .qs-body');
     const raw = body.getAttribute('data-code') || body.innerText;
-    // Decode HTML entities
     const txt = raw.replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&').replace(/&quot;/g,'"');
-    navigator.clipboard.writeText(txt).then(() => {
-      btn.textContent = '已复制 ✓';
-      btn.classList.add('copied');
-      setTimeout(() => { btn.textContent = '复制'; btn.classList.remove('copied'); }, 2000);
-    }).catch(() => {
-      // Fallback for non-https
-      const ta = document.createElement('textarea');
-      ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0';
-      document.body.appendChild(ta); ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-      btn.textContent = '已复制 ✓'; btn.classList.add('copied');
-      setTimeout(() => { btn.textContent = '复制'; btn.classList.remove('copied'); }, 2000);
-    });
+    const ok = () => { btn.textContent='已复制 ✓'; btn.classList.add('copied'); setTimeout(()=>{btn.textContent='复制代码';btn.classList.remove('copied');},2000); };
+    if (navigator.clipboard) { navigator.clipboard.writeText(txt).then(ok).catch(()=>fb(txt,ok)); } else { fb(txt,ok); }
+  }
+  function fb(txt, cb) {
+    const ta = document.createElement('textarea');
+    ta.value=txt; ta.style.cssText='position:fixed;opacity:0';
+    document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+    document.body.removeChild(ta); cb();
   }
 
-  // ── Panel sidebar nav ──
-  function panelNav(el) {
-    el.closest('.panel-sidebar').querySelectorAll('.ps-item').forEach(i => i.classList.remove('active'));
-    el.classList.add('active');
-  }
+  // Scroll fade-up
+  const io = new IntersectionObserver(entries => {
+    entries.forEach(e => { if(e.isIntersecting){ e.target.classList.add('vis'); io.unobserve(e.target); } });
+  }, { threshold: 0.08 });
+  document.querySelectorAll('.fu').forEach(el => io.observe(el));
 
-  // ── Smooth highlight nav links on scroll ──
-  const sections = document.querySelectorAll('section[id], div[id="features"]');
-  const navLinks = document.querySelectorAll('.nav-links a');
+  // Nav scroll border
   window.addEventListener('scroll', () => {
-    let cur = '';
-    sections.forEach(s => { if (window.scrollY >= s.offsetTop - 80) cur = s.id; });
-    navLinks.forEach(a => {
-      a.style.color = a.getAttribute('href') === '#' + cur ? 'var(--brand)' : '';
-    });
+    document.getElementById('nav').classList.toggle('scrolled', window.scrollY > 20);
   }, { passive: true });
 </script>
 </body>
