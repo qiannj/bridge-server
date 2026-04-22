@@ -184,7 +184,7 @@
           </div>
           <div class="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700 shadow-sm">
             <div class="flex items-center justify-between mb-2">
-              <span class="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">活跃 Providers</span>
+              <span class="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">已接入模型服务</span>
               <span class="text-lg">🔌</span>
             </div>
             <div class="text-2xl font-bold text-indigo-600" x-text="Object.keys(status?.providers || {}).length"></div>
@@ -395,50 +395,42 @@
       <div x-show="page === 'routing'" x-cloak>
 
         <!-- Routing priority status bar -->
-        <div x-show="bypassRouter.enabled || activeCustomRouter"
+        <div x-show="bypassRouter.enabled"
           class="mb-4 flex items-center gap-2 px-4 py-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 text-xs text-slate-500 dark:text-slate-400 flex-wrap">
-          <span class="font-semibold text-slate-600 dark:text-slate-300 flex-shrink-0">当前路由优先级：</span>
-          <span class="px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300">1 · 客户端指定模型</span>
+          <span class="font-semibold text-slate-600 dark:text-slate-300 flex-shrink-0">当前分流顺序：</span>
+          <span class="px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300">1 · 用户指定模型</span>
           <span class="text-slate-300 dark:text-slate-600">›</span>
-          <span :class="bypassRouter.enabled ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 font-semibold ring-1 ring-purple-300 dark:ring-purple-700' : 'bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500 line-through'"
-            class="px-2 py-0.5 rounded">
-            2 · 旁路路由器<template x-if="bypassRouter.enabled"> <span class="ml-1">✓</span></template>
+          <span class="bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 font-semibold ring-1 ring-purple-300 dark:ring-purple-700 px-2 py-0.5 rounded">
+            2 · 智能分流 <span class="ml-1">✓</span>
           </span>
           <span class="text-slate-300 dark:text-slate-600">›</span>
-          <span :class="activeCustomRouter && !bypassRouter.enabled ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-semibold ring-1 ring-blue-300 dark:ring-blue-700' : (activeCustomRouter && bypassRouter.enabled ? 'bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500 line-through' : 'bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500')"
-            class="px-2 py-0.5 rounded"
-            x-text="activeCustomRouter ? ('3 · 插件路由器「' + activeCustomRouter + '」') : '3 · 插件路由器'">
-          </span>
-          <span class="text-slate-300 dark:text-slate-600">›</span>
-          <span class="px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400">4 · 场景路由（本页）</span>
-          <template x-if="bypassRouter.enabled && activeCustomRouter">
-            <span class="ml-auto text-amber-600 dark:text-amber-400 font-medium flex-shrink-0">⚠️ 插件路由器被旁路路由器覆盖</span>
-          </template>
+          <span class="px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400">3 · 场景规则</span>
+          <span class="ml-auto text-slate-400">先按你的偏好判断，再回落到场景规则</span>
         </div>
 
         <!-- Strategy row -->
         <div class="bg-white dark:bg-slate-800 rounded-xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm mb-4 flex items-center gap-4">
-          <span class="text-sm font-semibold text-slate-700 dark:text-slate-300 flex-shrink-0">路由策略</span>
+          <span class="text-sm font-semibold text-slate-700 dark:text-slate-300 flex-shrink-0">分流目标</span>
           <select x-model="routingStrategy" class="flex-1 max-w-xs px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-brand-500">
-            <option value="fallback">fallback — 故障转移</option>
-            <option value="round_robin">round_robin — 轮询</option>
-            <option value="cost_optimized">cost_optimized — 成本优化</option>
-            <option value="lowest_latency">lowest_latency — 最低延迟</option>
+            <option value="fallback">稳定优先 — 当前模型不可用时自动切换</option>
+            <option value="round_robin">均衡分配 — 多个模型轮流承接</option>
+            <option value="cost_optimized">成本优先 — 优先走更省钱的模型</option>
+            <option value="lowest_latency">响应优先 — 优先走更快的模型</option>
           </select>
-          <button @click="saveRouting()" :disabled="loading" class="px-4 py-1.5 bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors">保存策略</button>
+          <button @click="saveRouting()" :disabled="loading" class="px-4 py-1.5 bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors">保存设置</button>
         </div>
 
         <!-- Scenarios -->
         <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
           <div class="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-700">
-            <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300">场景路由规则</h3>
+            <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300">按需求分流</h3>
             <div class="flex items-center gap-2">
               <button @click="saveRouting()" :disabled="loading" class="px-3 py-1.5 bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-xs font-semibold rounded-lg transition-colors">💾 保存全部</button>
               <button @click="addScenario()" class="px-3 py-1.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-lg transition-colors">+ 新增场景</button>
             </div>
           </div>
 
-          <div x-show="Object.keys(routingScenarios).length === 0" class="p-8 text-center text-sm text-slate-400 italic">暂无场景路由配置</div>
+          <div x-show="Object.keys(routingScenarios).length === 0" class="p-8 text-center text-sm text-slate-400 italic">还没有设置分流规则，先新增一个常用场景吧</div>
 
           <div class="divide-y divide-slate-100 dark:divide-slate-700">
             <template x-for="(sc, key) in routingScenarios" :key="key">
@@ -502,12 +494,12 @@
                   <button
                     @click="sc.patterns = sc.patterns || []; sc.patterns.push('')"
                     class="mt-1 text-xs text-brand-600 hover:text-brand-700 font-medium"
-                  >+ 添加规则</button>
-                  <p class="text-xs text-slate-400 mt-1">每条规则为正则表达式（支持 <code class="bg-slate-100 dark:bg-slate-700 px-1 rounded">|</code> 多选），不区分大小写。匹配任意一条即命中该场景。</p>
+                  >+ 添加关键词规则</button>
+                  <p class="text-xs text-slate-400 mt-1">一句需求命中任意一条规则，就会优先走这个场景。可写成“代码|编程|报错修复”这种简单组合。</p>
 
                   <!-- Exclude patterns -->
                   <div class="mt-3 pt-2 border-t border-slate-100 dark:border-slate-700">
-                    <p class="text-xs font-medium text-red-500 dark:text-red-400 mb-1.5">🚫 排除规则 <span class="font-normal text-slate-400">（消息命中则跳过此场景）</span></p>
+                    <p class="text-xs font-medium text-red-500 dark:text-red-400 mb-1.5">🚫 不适用关键词 <span class="font-normal text-slate-400">（命中后跳过这个场景）</span></p>
                     <template x-for="(pat, idx) in (sc.exclude_patterns || [])" :key="'ex'+idx">
                       <div class="flex items-center gap-2 mb-1">
                         <span class="text-xs text-slate-400 w-4 text-right flex-shrink-0" x-text="idx+1"></span>
@@ -523,8 +515,8 @@
                     <button
                       @click="if (!sc.exclude_patterns) sc.exclude_patterns = []; sc.exclude_patterns.push('')"
                       class="mt-0.5 text-xs text-red-500 hover:text-red-600 font-medium"
-                    >+ 添加排除规则</button>
-                    <p class="text-xs text-slate-400 mt-1.5">示例：架构场景加排除 <code class="bg-slate-100 dark:bg-slate-700 px-1 rounded">写.*代码|实现|编写</code>，则「按照这个架构写代码」会跳过架构场景，路由到代码场景。</p>
+                    >+ 添加不适用关键词</button>
+                    <p class="text-xs text-slate-400 mt-1.5">示例：给“方案建议”场景加上 <code class="bg-slate-100 dark:bg-slate-700 px-1 rounded">写.*代码|直接实现</code>，那么“按这个方案直接写代码”就会自动交给代码场景。</p>
                   </div>
                 </div>
               </div>
@@ -533,42 +525,22 @@
         </div>
       </div>
 
-      <!-- ── BYPASS ROUTER ── -->
+      <!-- ── SMART ROUTING ── -->
       <div x-show="page === 'bypass-router'" x-cloak>
 
         <!-- Info banner -->
         <div class="mb-4 flex items-start gap-3 p-4 bg-purple-50 dark:bg-purple-900/20 rounded-xl border border-purple-200 dark:border-purple-800">
           <span class="text-2xl flex-shrink-0">🧠</span>
           <div>
-            <p class="text-sm font-semibold text-purple-900 dark:text-purple-200">旁路模型路由器</p>
-            <p class="text-xs text-purple-700 dark:text-purple-300 mt-0.5">指定一个 LLM 作为路由决策模型，根据你的路由规则自动选择最合适的执行模型，并可选地对长对话上下文进行压缩后再发送。优先级高于场景路由，低于客户端明确指定的 model。</p>
-          </div>
-        </div>
-
-        <!-- Mutual-exclusion warning: custom plugin router is active -->
-        <div x-show="activeCustomRouter" x-cloak
-          class="mb-4 flex items-start gap-3 p-4 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800">
-          <span class="text-xl flex-shrink-0 mt-0.5">⚠️</span>
-          <div class="flex-1">
-            <p class="text-sm font-semibold text-amber-800 dark:text-amber-300">
-              代码插件路由器「<span x-text="activeCustomRouter" class="font-mono"></span>」当前已激活
-            </p>
-            <p class="text-xs text-amber-700 dark:text-amber-400 mt-1">
-              旁路路由器与代码插件路由器是<strong>同级替代方案</strong>。
-              <template x-if="bypassRouter.enabled">
-                <span>由于旁路路由器已启用，代码插件路由器将被<strong>跳过</strong>。如需使用代码插件路由器，请先关闭旁路路由器。</span>
-              </template>
-              <template x-if="!bypassRouter.enabled">
-                <span>若启用旁路路由器，代码插件路由器将被跳过，两者同时只有一个生效。</span>
-              </template>
-            </p>
+            <p class="text-sm font-semibold text-purple-900 dark:text-purple-200">智能分流</p>
+            <p class="text-xs text-purple-700 dark:text-purple-300 mt-0.5">先用一个轻量模型判断这次请求更适合走哪个模型，再把请求交给更合适的执行模型。适合同时接多家模型时，自动兼顾速度、成本和效果。</p>
           </div>
         </div>
 
         <!-- Config card -->
         <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm mb-4">
           <div class="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-700">
-            <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300">路由器设置</h3>
+            <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300">智能分流设置</h3>
             <div class="flex items-center gap-2">
               <!-- Enable toggle -->
               <span class="text-xs text-slate-500 dark:text-slate-400">启用</span>
@@ -585,13 +557,13 @@
           <div class="px-5 py-5 space-y-5">
             <!-- Routing model -->
             <div>
-              <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">路由决策模型 <span class="text-slate-400 font-normal">（格式：provider/model-id）</span></label>
+              <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">判断模型 <span class="text-slate-400 font-normal">（谁来先帮你挑模型）</span></label>
               <div class="flex gap-2">
                 <select
                   x-model="bypassRouter.routing_model"
                   class="flex-1 px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 focus:ring-2 focus:ring-purple-500"
                 >
-                  <option value="">— 请选择路由模型 —</option>
+                  <option value="">— 请选择判断模型 —</option>
                   <template x-for="m in allModels" :key="m">
                     <option :value="m" x-text="m"></option>
                   </template>
@@ -599,45 +571,45 @@
                 <input
                   type="text"
                   x-model="bypassRouter.routing_model"
-                  placeholder="或手动输入 provider/model"
+                  placeholder="也可以手动输入 provider/model"
                   class="flex-1 px-3 py-2 text-sm font-mono rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 focus:ring-2 focus:ring-purple-500"
                 />
               </div>
-              <p class="text-xs text-slate-400 mt-1">建议使用低成本快速模型（如 dashscope/qwen3.5-flash），路由本身会额外消耗少量 token。</p>
+              <p class="text-xs text-slate-400 mt-1">建议选一个又快又便宜的模型来做判断，这一步只负责“先选路”，不会直接替你完成任务。</p>
             </div>
 
             <!-- Routing rules -->
             <div>
-              <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">路由规则 <span class="text-slate-400 font-normal">（自然语言描述，将注入路由提示词）</span></label>
+              <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">分流偏好说明 <span class="text-slate-400 font-normal">（告诉系统什么需求该走什么模型）</span></label>
               <textarea
                 x-model="bypassRouter.routing_rules"
                 rows="4"
-                placeholder="例如：&#10;- 代码生成任务优先选 dashscope/qwen3-coder-plus&#10;- 需要长文本或创意写作时选 moonshot/kimi-chat&#10;- 其他通用任务使用 dashscope/qwen3.5-plus"
-                class="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 focus:ring-2 focus:ring-purple-500 font-mono resize-y"
+                placeholder="例如：&#10;- 写代码、改 bug 时优先走更擅长代码的模型&#10;- 长文整理、方案说明时优先走更稳的模型&#10;- 其他常规问题优先走更省钱的模型"
+                class="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 focus:ring-2 focus:ring-purple-500 resize-y"
               ></textarea>
             </div>
 
             <!-- Advanced settings row -->
             <div class="grid grid-cols-2 gap-4">
               <div>
-                <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">路由超时 (ms)</label>
+                <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">最长等待时间 (ms)</label>
                 <input
                   type="number"
                   x-model.number="bypassRouter.timeout_ms"
                   min="500" max="30000" step="500"
                   class="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 focus:ring-2 focus:ring-purple-500"
                 />
-                <p class="text-xs text-slate-400 mt-1">超时后自动降级到场景路由</p>
+                <p class="text-xs text-slate-400 mt-1">如果判断太慢，就直接回到场景规则，避免影响用户响应。</p>
               </div>
               <div>
-                <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">上下文压缩阈值（消息数）</label>
+                <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">长对话整理阈值（消息数）</label>
                 <input
                   type="number"
                   x-model.number="bypassRouter.compress_context_threshold"
                   min="2" max="200" step="1"
                   class="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 focus:ring-2 focus:ring-purple-500"
                 />
-                <p class="text-xs text-slate-400 mt-1">超过此数量才允许路由器建议压缩上下文</p>
+                <p class="text-xs text-slate-400 mt-1">对话太长时，系统才会先做整理，减少跑偏和无效开销。</p>
               </div>
             </div>
 
@@ -650,9 +622,9 @@
               <button @click="testBypassRouter()" :disabled="bypassRouterTesting || !bypassRouter.enabled"
                 class="px-5 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50 text-slate-700 dark:text-slate-300 text-sm font-semibold rounded-lg transition-colors flex items-center gap-2">
                 <span x-show="bypassRouterTesting" class="w-4 h-4 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></span>
-                🧪 测试路由
+                🧪 试试分流效果
               </button>
-              <span x-show="!bypassRouter.enabled" class="text-xs text-slate-400 italic">启用后才可测试</span>
+              <span x-show="!bypassRouter.enabled" class="text-xs text-slate-400 italic">启用后才可以测试</span>
             </div>
           </div>
         </div>
@@ -1538,11 +1510,11 @@ function app() {
     // navigation
     page: 'dashboard',
     navItems: [
-      { id: 'dashboard', label: '仪表盘', icon: '📊' },
-      { id: 'providers', label: 'Providers', icon: '🔌' },
-      { id: 'routing', label: '路由配置', icon: '🔀' },
-      { id: 'bypass-router', label: '旁路路由器', icon: '🧠' },
-      { id: 'usage', label: '用量统计', icon: '📈' },
+      { id: 'dashboard', label: '总览', icon: '📊' },
+      { id: 'providers', label: '模型服务', icon: '🔌' },
+      { id: 'routing', label: '场景分流', icon: '🔀' },
+      { id: 'bypass-router', label: '智能分流', icon: '🧠' },
+      { id: 'usage', label: '使用情况', icon: '📈' },
       { id: 'savings', label: '降本看板', icon: '💰' },
       { id: 'logs', label: '日志', icon: '📋' },
       { id: 'system', label: '系统 / 更新', icon: '⚙️' },
@@ -2037,7 +2009,7 @@ function app() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(this.bypassRouter),
         });
-        if (res.ok) this.showToast('旁路路由器配置已保存');
+        if (res.ok) this.showToast('智能分流设置已保存');
         else {
           const err = await res.json().catch(() => ({}));
           this.showToast(err.detail || '保存失败', 'error');
