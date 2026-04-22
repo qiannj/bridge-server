@@ -38,7 +38,8 @@ services:
     expose:
       - "19377"
     volumes:
-      - ./config.yaml:/app/config.yaml:ro
+      - bridge_config:/home/bridge/.bridge-server
+      - ./config.yaml:/home/bridge/.bridge-server/config.yaml:ro
       - ./logs:/app/logs
       - bridge_data:/app/data
     environment:
@@ -137,6 +138,8 @@ networks:
 # 数据卷
 volumes:
   nginx_logs:
+  bridge_config:
+    driver: local
   bridge_data:
   redis_data:
   prometheus_data:

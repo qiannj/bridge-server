@@ -81,7 +81,8 @@ services:
       - MOONSHOT_API_KEY=${MOONSHOT_API_KEY:-}
       - MINIMAX_API_KEY=${MINIMAX_API_KEY:-}
     volumes:
-      - ./config.yaml:/root/.bridge-server/config.yaml:ro
+      - bridge_config:/home/bridge/.bridge-server
+      - ./config.yaml:/home/bridge/.bridge-server/config.yaml:ro
       - bridge_logs:/app/logs
     networks:
       - bridge-network
@@ -146,4 +147,6 @@ volumes:
   nginx_logs:
     driver: local
   bridge_logs:
+    driver: local
+  bridge_config:
     driver: local
