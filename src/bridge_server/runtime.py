@@ -668,7 +668,70 @@ def _split_model_ref(model_ref: str) -> Tuple[Optional[str], str]:
     return provider_id.strip() or None, model_id.strip()
 
 
-def _resolve_requested_model(model_ref: Optional[str], manager: ProviderManager) -> Optional[RouteResult]:
+# ── 空回合检测与兜底 ────────────────────────────────────────────────────────────
+
+def _detect_empty_non_stream_turn(response: Dict[str, Any]) -> bool:
+    """判断非流式响应是否为"空回合"：stop 但无可见内容、无 tool_calls。"""
+    choice0 = (response.get("choices") or [{}])[0]
+    message = choice0.get("message") or {}
+    finish_reason = choice0.get("finish_reason")
+    tool_calls = message.get("tool_calls") or []
+    function_call = message.get("function_call")
+    content = str(message.get("content") or "").strip()
+    return (
+        finish_reason in {"stop", None}
+        and not tool_calls
+        and not function_call
+        and not content
+    )
+
+
+def _is_tool_followup(messages: List[Dict[str, Any]]) -> bool:
+    """判断当前请求是否为工具执行后的 follow-up（最近一条非 system 消息为 tool）。"""
+    for m in reversed(messages):
+        role = m.get("role", "")
+        if role == "system":
+            continue
+        return role == "tool"
+    return False
+
+
+def _build_empty_turn_retry_messages(
+    messages: List[Dict[str, Any]], is_tool_followup: bool
+) -> List[Dict[str, Any]]:
+    """在原始消息列表末尾追加轻量指导系统提示，用于空回合重试。"""
+    if is_tool_followup:
+        guidance = (
+            "You have already received the tool result. "
+            "Now produce a concise user-facing answer based on that result. "
+            "Do not call tools again unless absolutely necessary. "
+            "Do not return an empty response."
+        )
+    else:
+        guidance = (
+            "Your previous response ended without any user-visible content. "
+            "Return either: 1. a normal assistant reply, or 2. a structured tool call. "
+            "Do not return an empty response."
+        )
+    return messages + [{"role": "system", "content": guidance}]
+
+
+def _make_fallback_text(is_tool_followup: bool) -> str:
+    """生成最小可见兜底文本。"""
+    if is_tool_followup:
+        return "工具已执行完成，但模型未生成最终回复。请重试一次。"
+    return "上游模型本轮未返回有效内容，请重试一次。"
+
+
+def _inject_fallback_into_response(response: Dict[str, Any], text: str) -> None:
+    """将兜底文本注入非流式响应（就地修改）。"""
+    choices = response.setdefault("choices", [{}])
+    if not choices:
+        choices.append({})
+    message = choices[0].setdefault("message", {})
+    message["content"] = text
+    message["role"] = "assistant"
+    choices[0]["finish_reason"] = "stop"
     """Resolve the OpenAI `model` field into a direct provider/model route.
 
     Returns None for missing or `smart`, which means the smart router should be used.
@@ -1020,7 +1083,55 @@ async def chat_completions(
                 "success",
                 llm_time / 1000,
             )
-            
+
+            # 4b. 空回合检测与兜底（非流式）
+            _is_tool_fu = _is_tool_followup(messages)
+            if _detect_empty_non_stream_turn(response):
+                _orig_reasoning = bool(
+                    ((response.get("choices") or [{}])[0].get("message") or {}).get("reasoning_content")
+                )
+                logger.warning(
+                    "empty_turn_detected",
+                    provider=route_result.provider_id,
+                    model=route_result.model,
+                    stream=False,
+                    had_reasoning=_orig_reasoning,
+                    had_visible_text=False,
+                    had_tool_calls=False,
+                    last_input_role="tool" if _is_tool_fu else "user",
+                    fallback_stage="initial",
+                )
+                _retry_ok = False
+                try:
+                    logger.info("empty_turn_retry_started", stream=False)
+                    _retry_resp = await provider_manager.chat_completion(
+                        messages=_build_empty_turn_retry_messages(messages, _is_tool_fu),
+                        model=route_result.model,
+                        provider_id=route_result.provider_id,
+                        max_tokens=req_dict.get("max_tokens", 4000),
+                        temperature=req_dict.get("temperature", 0.7),
+                        stream=False,
+                        **extra_kwargs,
+                    )
+                    if not _detect_empty_non_stream_turn(_retry_resp):
+                        response = _retry_resp
+                        _retry_ok = True
+                        logger.info(
+                            "empty_turn_retry_succeeded",
+                            provider=route_result.provider_id,
+                            model=route_result.model,
+                        )
+                    else:
+                        logger.warning("empty_turn_retry_failed_still_empty",
+                                       provider=route_result.provider_id, model=route_result.model)
+                except Exception as _retry_exc:
+                    logger.error("empty_turn_retry_error", error=str(_retry_exc))
+                if not _retry_ok:
+                    _inject_fallback_into_response(response, _make_fallback_text(_is_tool_fu))
+                    logger.info("empty_turn_fallback_emitted",
+                                provider=route_result.provider_id, model=route_result.model,
+                                is_tool_followup=_is_tool_fu)
+
             # 5. 异步记录用量（不阻塞响应）
             if usage_tracker and "usage" in response:
                 usage_info = response["usage"]
@@ -1135,6 +1246,9 @@ async def _stream_chat_completion(
     completion_tokens = 0
     reasoning_chars = 0
     stream_err: Optional[Exception] = None
+    seen_visible_chars = 0   # 可见正文字符数（不含 reasoning，用于空回合检测）
+    seen_tool_calls = False  # 是否出现过 tool_calls delta
+    last_finish_reason: Optional[str] = None
 
     try:
         async for chunk in provider_manager.chat_completion_stream(
@@ -1169,6 +1283,13 @@ async def _stream_chat_completion(
                     # 只有携带实际内容的 chunk 才计数
                     if delta.get("content") or delta.get("reasoning_content"):
                         content_chunks_sent += 1
+                    # 空回合检测状态跟踪
+                    seen_visible_chars += len(delta.get("content") or "")
+                    if delta.get("tool_calls"):
+                        seen_tool_calls = True
+                    fr = choice.get("finish_reason")
+                    if fr:
+                        last_finish_reason = fr
 
             if first_chunk and isinstance(payload, dict):
                 first_chunk = False
@@ -1294,6 +1415,77 @@ async def _stream_chat_completion(
         current_user=current_user,
         duration_ms=llm_time,
     ))
+
+    # ── 空回合检测（流式）────────────────────────────────────────────────────
+    if last_finish_reason == "stop" and seen_visible_chars == 0 and not seen_tool_calls:
+        _is_tool_fu = _is_tool_followup(messages)
+        logger.warning(
+            "empty_turn_detected",
+            provider=route_result.provider_id,
+            model=route_result.model,
+            stream=True,
+            had_reasoning=reasoning_chars > 0,
+            had_visible_text=False,
+            had_tool_calls=False,
+            last_input_role="tool" if _is_tool_fu else "user",
+            fallback_stage="initial",
+        )
+        _et_id = f"chatcmpl-et-{int(time.time())}"
+        _et_created = int(time.time())
+        _fallback_text: Optional[str] = None
+
+        try:
+            logger.info("empty_turn_retry_started", stream=True,
+                        provider=route_result.provider_id, model=route_result.model)
+            _retry_resp = await provider_manager.chat_completion(
+                messages=_build_empty_turn_retry_messages(messages, _is_tool_fu),
+                model=route_result.model,
+                provider_id=route_result.provider_id,
+                max_tokens=req_dict.get("max_tokens", 4000),
+                temperature=req_dict.get("temperature", 0.7),
+                stream=False,
+                **extra_kwargs,
+            )
+            _retry_choice = (_retry_resp.get("choices") or [{}])[0]
+            _retry_content = str((_retry_choice.get("message") or {}).get("content") or "").strip()
+            if _retry_content:
+                logger.info("empty_turn_retry_succeeded", provider=route_result.provider_id,
+                            model=route_result.model, content_len=len(_retry_content))
+                _fallback_text = _retry_content
+                _et_id = _retry_resp.get("id") or _et_id
+                _et_created = _retry_resp.get("created") or _et_created
+                # Update token counters
+                _ru = _retry_resp.get("usage") or {}
+                prompt_tokens = _ru.get("prompt_tokens", prompt_tokens)
+                completion_tokens = _ru.get("completion_tokens", completion_tokens)
+            else:
+                logger.warning("empty_turn_retry_failed_still_empty",
+                               provider=route_result.provider_id, model=route_result.model)
+        except Exception as _et_exc:
+            logger.error("empty_turn_retry_error", error=str(_et_exc))
+
+        if _fallback_text is None:
+            _fallback_text = _make_fallback_text(_is_tool_fu)
+            logger.info("empty_turn_fallback_emitted", provider=route_result.provider_id,
+                        model=route_result.model, is_tool_followup=_is_tool_fu)
+
+        _delta_chunk: Dict[str, Any] = {
+            "id": _et_id,
+            "object": "chat.completion.chunk",
+            "created": _et_created,
+            "model": route_result.model,
+            "choices": [{"index": 0, "delta": {"role": "assistant", "content": _fallback_text}, "finish_reason": None}],
+            "usage": {"routing": routing_info, "empty_turn_fallback": True},
+        }
+        _stop_chunk: Dict[str, Any] = {
+            "id": _et_id,
+            "object": "chat.completion.chunk",
+            "created": _et_created,
+            "model": route_result.model,
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+        }
+        yield f"data: {json.dumps(_delta_chunk, ensure_ascii=False)}\n\n"
+        yield f"data: {json.dumps(_stop_chunk, ensure_ascii=False)}\n\n"
 
     yield "data: [DONE]\n\n"
 
