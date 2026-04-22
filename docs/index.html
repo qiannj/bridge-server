@@ -259,9 +259,21 @@
       padding: 8px 18px; border-radius: 8px 8px 0 0;
       font-size: 0.8rem; font-weight: 600; cursor: pointer;
       background: #1e293b; color: #64748b; border: 1px solid #334155; border-bottom: none;
-      user-select: none;
+      user-select: none; transition: color .15s, background .15s;
     }
+    .tab:hover { color: #94a3b8; }
     .tab.active { background: #0f172a; color: #e2e8f0; border-color: #475569; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* ── COPY BUTTON ── */
+    .copy-btn {
+      background: #334155; color: #94a3b8;
+      border: none; padding: 4px 12px; border-radius: 6px;
+      font-size: 0.72rem; cursor: pointer; transition: background .15s, color .15s;
+    }
+    .copy-btn:hover { background: #475569; color: #e2e8f0; }
+    .copy-btn.copied { background: #14532d; color: #4ade80; }
 
     /* ── PROVIDERS ── */
     .providers-grid {
@@ -564,14 +576,14 @@
     </div>
     <div class="panel-body">
       <div class="panel-sidebar">
-        <div class="ps-item active">📊 仪表盘</div>
-        <div class="ps-item">🔌 Providers</div>
-        <div class="ps-item">🔀 路由配置</div>
-        <div class="ps-item">🧠 旁路路由器</div>
-        <div class="ps-item">📈 用量统计</div>
-        <div class="ps-item">💰 降本看板</div>
-        <div class="ps-item">📋 日志</div>
-        <div class="ps-item">⚙️ 系统</div>
+        <div class="ps-item active" onclick="panelNav(this)">📊 仪表盘</div>
+        <div class="ps-item" onclick="panelNav(this)">🔌 Providers</div>
+        <div class="ps-item" onclick="panelNav(this)">🔀 路由配置</div>
+        <div class="ps-item" onclick="panelNav(this)">🧠 旁路路由器</div>
+        <div class="ps-item" onclick="panelNav(this)">📈 用量统计</div>
+        <div class="ps-item" onclick="panelNav(this)">💰 降本看板</div>
+        <div class="ps-item" onclick="panelNav(this)">📋 日志</div>
+        <div class="ps-item" onclick="panelNav(this)">⚙️ 系统</div>
       </div>
       <div class="panel-content">
         <div class="pc-title">今日概览</div>
@@ -624,39 +636,139 @@
   <h2>5 分钟完成部署</h2>
   <p class="section-sub">选择最适合你的安装方式，安装后访问 <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;">http://localhost:19377</code> 进入管理面板。</p>
 
-  <div class="tabs">
-    <div class="tab active">pip 直接运行</div>
-    <div class="tab">Setup Wizard</div>
-    <div class="tab">Docker</div>
+  <div class="tabs" id="qs-tabs">
+    <div class="tab active" onclick="switchTab(0)">pip 直接运行</div>
+    <div class="tab" onclick="switchTab(1)">Setup Wizard</div>
+    <div class="tab" onclick="switchTab(2)">Docker</div>
   </div>
 
-  <div class="code-area">
-    <div class="code-header">
-      <div class="code-dots">
-        <span class="cd-red"></span><span class="cd-yellow"></span><span class="cd-green"></span>
+  <!-- Tab 0: pip -->
+  <div class="tab-content active" id="tab-0">
+    <div class="code-area">
+      <div class="code-header">
+        <div class="code-dots">
+          <span class="cd-red"></span><span class="cd-yellow"></span><span class="cd-green"></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="code-lang">bash</span>
+          <button class="copy-btn" onclick="copyCode(this,'tab-0')">复制</button>
+        </div>
       </div>
-      <span class="code-lang">bash</span>
+      <div class="code-body" data-code="# 1. 安装
+pip install bridge-server
+
+# 2. 设置 API Key（至少一个 Provider）
+export DASHSCOPE_API_KEY=sk-xxx
+
+# 3. 启动
+python -m uvicorn bridge_server.runtime:app --app-dir src --port 19377
+
+# 4. 发起第一个请求
+curl -X POST http://127.0.0.1:19377/v1/chat/completions \
+  -H &quot;Authorization: Bearer &lt;your-token&gt;&quot; \
+  -H &quot;Content-Type: application/json&quot; \
+  -d '{&quot;model&quot;:&quot;smart&quot;,&quot;messages&quot;:[{&quot;role&quot;:&quot;user&quot;,&quot;content&quot;:&quot;你好&quot;}]}'">
+        <div><span class="c-gray"># 1. 安装</span></div>
+        <div><span class="c-green">pip</span> <span class="c-white">install bridge-server</span></div>
+        <div>&nbsp;</div>
+        <div><span class="c-gray"># 2. 设置 API Key（至少一个 Provider）</span></div>
+        <div><span class="c-cyan">export</span> <span class="c-yellow">DASHSCOPE_API_KEY</span><span class="c-white">=sk-xxx</span></div>
+        <div>&nbsp;</div>
+        <div><span class="c-gray"># 3. 启动</span></div>
+        <div><span class="c-green">python</span> <span class="c-white">-m uvicorn bridge_server.runtime:app</span> <span class="c-purple">--app-dir</span> <span class="c-white">src</span> <span class="c-purple">--port</span> <span class="c-white">19377</span></div>
+        <div>&nbsp;</div>
+        <div><span class="c-gray"># 4. 发起第一个请求</span></div>
+        <div><span class="c-green">curl</span> <span class="c-white">-X POST http://127.0.0.1:19377/v1/chat/completions</span> <span class="c-orange">\</span></div>
+        <div><span class="c-white">  -H </span><span class="c-yellow">"Authorization: Bearer &lt;your-token&gt;"</span> <span class="c-orange">\</span></div>
+        <div><span class="c-white">  -H </span><span class="c-yellow">"Content-Type: application/json"</span> <span class="c-orange">\</span></div>
+        <div><span class="c-white">  -d </span><span class="c-yellow">'{"model":"smart","messages":[{"role":"user","content":"你好"}]}'</span></div>
+      </div>
     </div>
-    <div class="code-body">
-      <div><span class="c-gray"># 1. 安装</span></div>
-      <div><span class="c-green">pip</span> <span class="c-white">install bridge-server</span></div>
-      <div>&nbsp;</div>
-      <div><span class="c-gray"># 2. 设置 API Key（至少一个 Provider）</span></div>
-      <div><span class="c-cyan">export</span> <span class="c-yellow">DASHSCOPE_API_KEY</span><span class="c-white">=sk-xxx</span></div>
-      <div>&nbsp;</div>
-      <div><span class="c-gray"># 3. 启动</span></div>
-      <div><span class="c-green">python</span> <span class="c-white">-m uvicorn bridge_server.runtime:app</span> <span class="c-purple">--app-dir</span> <span class="c-white">src</span> <span class="c-purple">--port</span> <span class="c-white">19377</span></div>
-      <div>&nbsp;</div>
-      <div><span class="c-gray"># 4. 发起第一个请求</span></div>
-      <div><span class="c-green">curl</span> <span class="c-white">-X POST http://127.0.0.1:19377/v1/chat/completions</span> <span class="c-orange">\</span></div>
-      <div><span class="c-white">  -H </span><span class="c-yellow">"Authorization: Bearer &lt;your-token&gt;"</span> <span class="c-orange">\</span></div>
-      <div><span class="c-white">  -H </span><span class="c-yellow">"Content-Type: application/json"</span> <span class="c-orange">\</span></div>
-      <div><span class="c-white">  -d </span><span class="c-yellow">'{"model":"smart","messages":[{"role":"user","content":"你好"}]}'</span></div>
+    <div style="margin-top:1.5rem;padding:1rem 1.5rem;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;font-size:0.875rem;color:#166534;">
+      💡 首次启动会自动生成 Admin Token 并打印到控制台，访问 <code>http://localhost:19377</code> 进入管理面板。
     </div>
   </div>
 
-  <div style="margin-top:1.5rem;padding:1rem 1.5rem;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;font-size:0.875rem;color:#166534;">
-    💡 首次启动会自动生成 Admin Token 并打印到控制台，同时自动打开管理面板（<code>http://localhost:19377</code>）。
+  <!-- Tab 1: Setup Wizard -->
+  <div class="tab-content" id="tab-1">
+    <div class="code-area">
+      <div class="code-header">
+        <div class="code-dots">
+          <span class="cd-red"></span><span class="cd-yellow"></span><span class="cd-green"></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="code-lang">bash</span>
+          <button class="copy-btn" onclick="copyCode(this,'tab-1')">复制</button>
+        </div>
+      </div>
+      <div class="code-body" data-code="# 克隆仓库并运行交互式安装向导
+git clone https://github.com/qiannj/bridge-server.git
+cd bridge-server
+pip install -e .
+
+# 启动 Setup Wizard（引导式配置）
+python -m bridge_server.cli.setup_wizard
+
+# Wizard 完成后直接启动
+python -m bridge_server.cli.setup_wizard --start">
+        <div><span class="c-gray"># 克隆仓库并运行交互式安装向导</span></div>
+        <div><span class="c-green">git</span> <span class="c-white">clone https://github.com/qiannj/bridge-server.git</span></div>
+        <div><span class="c-green">cd</span> <span class="c-white">bridge-server</span></div>
+        <div><span class="c-green">pip</span> <span class="c-white">install -e .</span></div>
+        <div>&nbsp;</div>
+        <div><span class="c-gray"># 启动 Setup Wizard（引导式配置）</span></div>
+        <div><span class="c-green">python</span> <span class="c-white">-m bridge_server.cli.setup_wizard</span></div>
+        <div>&nbsp;</div>
+        <div><span class="c-gray"># Wizard 完成后直接启动</span></div>
+        <div><span class="c-green">python</span> <span class="c-white">-m bridge_server.cli.setup_wizard</span> <span class="c-purple">--start</span></div>
+      </div>
+    </div>
+    <div style="margin-top:1.5rem;padding:1rem 1.5rem;background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;font-size:0.875rem;color:#1e40af;">
+      🧙 Setup Wizard 会引导你逐步添加 Provider、设置路由规则、配置认证 Token，并提供模型连接测试和基准性能测试。
+    </div>
+  </div>
+
+  <!-- Tab 2: Docker -->
+  <div class="tab-content" id="tab-2">
+    <div class="code-area">
+      <div class="code-header">
+        <div class="code-dots">
+          <span class="cd-red"></span><span class="cd-yellow"></span><span class="cd-green"></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="code-lang">bash</span>
+          <button class="copy-btn" onclick="copyCode(this,'tab-2')">复制</button>
+        </div>
+      </div>
+      <div class="code-body" data-code="# 使用 Docker Compose 启动（包含 Nginx 反向代理）
+git clone https://github.com/qiannj/bridge-server.git
+cd bridge-server
+
+# 复制配置文件并填写 API Key
+cp config.yaml.example config.yaml
+
+# 启动服务
+docker-compose up -d
+
+# 查看日志
+docker-compose logs -f bridge-server">
+        <div><span class="c-gray"># 使用 Docker Compose 启动（包含 Nginx 反向代理）</span></div>
+        <div><span class="c-green">git</span> <span class="c-white">clone https://github.com/qiannj/bridge-server.git</span></div>
+        <div><span class="c-green">cd</span> <span class="c-white">bridge-server</span></div>
+        <div>&nbsp;</div>
+        <div><span class="c-gray"># 复制配置文件并填写 API Key</span></div>
+        <div><span class="c-green">cp</span> <span class="c-white">config.yaml.example config.yaml</span></div>
+        <div>&nbsp;</div>
+        <div><span class="c-gray"># 启动服务</span></div>
+        <div><span class="c-green">docker-compose</span> <span class="c-white">up -d</span></div>
+        <div>&nbsp;</div>
+        <div><span class="c-gray"># 查看日志</span></div>
+        <div><span class="c-green">docker-compose</span> <span class="c-white">logs -f bridge-server</span></div>
+      </div>
+    </div>
+    <div style="margin-top:1.5rem;padding:1rem 1.5rem;background:#fdf4ff;border:1px solid #e9d5ff;border-radius:12px;font-size:0.875rem;color:#6b21a8;">
+      🐳 Docker 模式默认在 19377 端口暴露服务，可在 <code>docker-compose.yml</code> 中修改端口映射和持久化挂载路径。
+    </div>
   </div>
 </div>
 </section>
@@ -717,5 +829,55 @@
   </p>
 </footer>
 
+<script>
+  // ── Tab switching ──
+  function switchTab(idx) {
+    document.querySelectorAll('#qs-tabs .tab').forEach((t, i) => {
+      t.classList.toggle('active', i === idx);
+    });
+    document.querySelectorAll('.tab-content').forEach((c, i) => {
+      c.classList.toggle('active', i === idx);
+    });
+  }
+
+  // ── Copy code ──
+  function copyCode(btn, tabId) {
+    const body = document.querySelector('#' + tabId + ' .code-body');
+    const raw = body.getAttribute('data-code') || body.innerText;
+    // Decode HTML entities
+    const txt = raw.replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&').replace(/&quot;/g,'"');
+    navigator.clipboard.writeText(txt).then(() => {
+      btn.textContent = '已复制 ✓';
+      btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = '复制'; btn.classList.remove('copied'); }, 2000);
+    }).catch(() => {
+      // Fallback for non-https
+      const ta = document.createElement('textarea');
+      ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      btn.textContent = '已复制 ✓'; btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = '复制'; btn.classList.remove('copied'); }, 2000);
+    });
+  }
+
+  // ── Panel sidebar nav ──
+  function panelNav(el) {
+    el.closest('.panel-sidebar').querySelectorAll('.ps-item').forEach(i => i.classList.remove('active'));
+    el.classList.add('active');
+  }
+
+  // ── Smooth highlight nav links on scroll ──
+  const sections = document.querySelectorAll('section[id], div[id="features"]');
+  const navLinks = document.querySelectorAll('.nav-links a');
+  window.addEventListener('scroll', () => {
+    let cur = '';
+    sections.forEach(s => { if (window.scrollY >= s.offsetTop - 80) cur = s.id; });
+    navLinks.forEach(a => {
+      a.style.color = a.getAttribute('href') === '#' + cur ? 'var(--brand)' : '';
+    });
+  }, { passive: true });
+</script>
 </body>
 </html>
