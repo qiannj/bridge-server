@@ -74,7 +74,18 @@ curl http://127.0.0.1:19377/api/models
 curl http://127.0.0.1:19377/api/routing
 ```
 
-`/v1/models` 面向 OpenAI 兼容客户端，`/api/models` 面向管理和排障。
+`/v1/models` 面向 OpenAI 兼容客户端，`/api/models` 面向管理和排障。模型目录会返回：
+
+- `smart`：Bridge Server 智能路由伪模型。
+- `provider/model-id`：推荐使用的稳定模型 ID，例如 `scnet/MiniMax-M2.5`。
+- 裸模型名别名：仅当该裸模型名在所有 Provider 中不冲突时返回，例如 `MiniMax-M2.5`。
+
+`/v1/chat/completions` 的 `model` 字段遵循同一套规则：
+
+- 不传 `model` 或传 `"smart"`：启用智能路由。
+- 传 `"provider/model-id"`：直接调用指定模型，不再强制改走智能路由。
+- 传裸模型名：只在模型名唯一时自动映射到对应 `provider/model-id`。
+- 传未知模型或冲突裸模型名：返回 400，避免客户端 verification 误判或响应模型不一致。
 
 ## 用量与预算
 
@@ -122,5 +133,5 @@ curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:19377/stats
 
 1. 默认不传 `model` 时，使用当前路由策略。
 2. 传 `model: "smart"` 时，启用智能路由。
-3. 传具体模型时，直接走指定模型。
+3. 传 `provider/model-id` 具体模型时，直接走指定模型。
 4. Provider 不可用或预算受限时，健康和指标端点会反映降级状态。

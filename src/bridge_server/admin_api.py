@@ -17,6 +17,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, 
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from bridge_server.auth import _HASHED_FORMAT_MARKER, _HASHED_FORMAT_VALUE, _hash_token
+
 GITHUB_REPO = "qiannj/bridge-server"
 GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 CURRENT_VERSION = "2.0.0"
@@ -38,6 +40,7 @@ def _load_yaml(path: Path) -> dict:
 
 
 def _save_yaml(path: Path, data: dict):
+    path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(data, f, allow_unicode=True, default_flow_style=False)
 
@@ -56,6 +59,151 @@ def generate_panel_token() -> str:
     auth["panel_token"] = token
     _save_yaml(auth_file, auth)
     return token
+
+
+def _tokens_file() -> Path:
+    return _get_config_dir() / "tokens.json"
+
+
+def _load_tokens() -> Dict[str, Any]:
+    path = _tokens_file()
+    if not path.exists():
+        return {_HASHED_FORMAT_MARKER: _HASHED_FORMAT_VALUE}
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f) or {}
+    if data.get(_HASHED_FORMAT_MARKER) != _HASHED_FORMAT_VALUE:
+        migrated: Dict[str, Any] = {_HASHED_FORMAT_MARKER: _HASHED_FORMAT_VALUE}
+        for key, value in data.items():
+            if not str(key).startswith("_"):
+                migrated[_hash_token(str(key))] = value
+        return migrated
+    return data
+
+
+def _save_tokens(data: Dict[str, Any]) -> None:
+    data[_HASHED_FORMAT_MARKER] = _HASHED_FORMAT_VALUE
+    path = _tokens_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    try:
+        import bridge_server.auth as auth_module
+        if auth_module.auth_manager is not None:
+            auth_module.auth_manager.clear_cache()
+    except Exception:
+        pass
+
+
+def _parse_expires_at(value: Optional[float] = None, iso_value: Optional[str] = None) -> Optional[float]:
+    if value is not None:
+        return float(value)
+    if not iso_value:
+        return None
+    text = iso_value.strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    return datetime.fromisoformat(text).timestamp()
+
+
+def _api_key_response(key_hash: str, info: Dict[str, Any]) -> Dict[str, Any]:
+    expires_at = info.get("expires_at")
+    return {
+        "id": key_hash[:16],
+        "name": info.get("name") or info.get("user_id") or "External API Key",
+        "key_preview": info.get("key_preview", "sk-****"),
+        "model_permissions": info.get("model_permissions") or ["*"],
+        "expires_at": expires_at,
+        "expires_at_iso": datetime.fromtimestamp(expires_at).isoformat() if expires_at else None,
+        "active": bool(info.get("active", True)),
+        "created_at": info.get("created_at"),
+        "updated_at": info.get("updated_at"),
+    }
+
+
+def list_external_api_keys() -> List[Dict[str, Any]]:
+    tokens = _load_tokens()
+    keys = []
+    for key_hash, info in tokens.items():
+        if str(key_hash).startswith("_") or not isinstance(info, dict):
+            continue
+        if info.get("type") == "external_api_key":
+            keys.append(_api_key_response(key_hash, info))
+    return sorted(keys, key=lambda item: item.get("created_at") or 0, reverse=True)
+
+
+def create_external_api_key(
+    *,
+    name: str,
+    model_permissions: Optional[List[str]] = None,
+    expires_at: Optional[float] = None,
+) -> Dict[str, Any]:
+    token = "sk-" + secrets.token_hex(32)
+    token_hash = _hash_token(token)
+    now = time.time()
+    permissions = [p.strip() for p in (model_permissions or ["*"]) if str(p).strip()]
+    if not permissions:
+        permissions = ["*"]
+
+    tokens = _load_tokens()
+    info = {
+        "type": "external_api_key",
+        "user_id": f"api-key:{name}",
+        "name": name,
+        "key_preview": token[:8] + "..." + token[-4:],
+        "model_permissions": permissions,
+        "expires_at": expires_at,
+        "active": True,
+        "created_at": now,
+        "updated_at": now,
+    }
+    tokens[token_hash] = info
+    _save_tokens(tokens)
+    return {"token": token, **_api_key_response(token_hash, info)}
+
+
+def update_external_api_key(
+    key_id: str,
+    *,
+    name: Optional[str] = None,
+    model_permissions: Optional[List[str]] = None,
+    expires_at: Any = ...,
+    active: Optional[bool] = None,
+) -> Dict[str, Any]:
+    tokens = _load_tokens()
+    matches = [
+        key_hash for key_hash, info in tokens.items()
+        if not str(key_hash).startswith("_")
+        and str(key_hash).startswith(key_id)
+        and isinstance(info, dict)
+        and info.get("type") == "external_api_key"
+    ]
+    if not matches:
+        raise KeyError(key_id)
+    if len(matches) > 1:
+        raise ValueError("API Key ID 不唯一，请使用更长的 ID")
+
+    key_hash = matches[0]
+    info = tokens[key_hash]
+    if name is not None:
+        info["name"] = name
+        info["user_id"] = f"api-key:{name}"
+    if model_permissions is not None:
+        permissions = [p.strip() for p in model_permissions if str(p).strip()]
+        info["model_permissions"] = permissions or ["*"]
+    if expires_at is not ...:
+        info["expires_at"] = expires_at
+    if active is not None:
+        info["active"] = active
+    info["updated_at"] = time.time()
+    tokens[key_hash] = info
+    _save_tokens(tokens)
+    return _api_key_response(key_hash, info)
+
+
+def delete_external_api_key(key_id: str) -> None:
+    update_external_api_key(key_id, active=False)
 
 
 async def require_panel_auth(
@@ -79,6 +227,22 @@ class TokenRequest(BaseModel):
     token: str
 
 
+class ExternalApiKeyCreateRequest(BaseModel):
+    name: str
+    model_permissions: List[str] = Field(default_factory=lambda: ["*"])
+    expires_at: Optional[float] = None
+    expires_at_iso: Optional[str] = None
+
+
+class ExternalApiKeyUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    model_permissions: Optional[List[str]] = None
+    expires_at: Optional[float] = None
+    expires_at_iso: Optional[str] = None
+    clear_expires_at: bool = False
+    active: Optional[bool] = None
+
+
 @router.post("/auth/verify", dependencies=[])
 async def verify_token(req: TokenRequest):
     """Verify panel token (no auth required - this IS the auth endpoint)."""
@@ -88,6 +252,60 @@ async def verify_token(req: TokenRequest):
     if secrets.compare_digest(req.token, stored):
         return {"ok": True}
     raise HTTPException(status_code=401, detail="Token 无效")
+
+
+@router.get("/api-keys", dependencies=_deps)
+async def get_api_keys():
+    """List external API keys without exposing plaintext secrets."""
+    return {"api_keys": list_external_api_keys()}
+
+
+@router.post("/api-keys", dependencies=_deps)
+async def add_api_key(req: ExternalApiKeyCreateRequest):
+    """Create an external API key. Plaintext token is returned once."""
+    expires_at = _parse_expires_at(req.expires_at, req.expires_at_iso)
+    created = create_external_api_key(
+        name=req.name,
+        model_permissions=req.model_permissions,
+        expires_at=expires_at,
+    )
+    return {"ok": True, "api_key": created}
+
+
+@router.put("/api-keys/{key_id}", dependencies=_deps)
+async def edit_api_key(key_id: str, req: ExternalApiKeyUpdateRequest):
+    """Update external API key metadata and permissions."""
+    try:
+        expires_marker: Any = ...
+        if req.clear_expires_at:
+            expires_marker = None
+        elif req.expires_at is not None or req.expires_at_iso:
+            expires_marker = _parse_expires_at(req.expires_at, req.expires_at_iso)
+
+        updated = update_external_api_key(
+            key_id,
+            name=req.name,
+            model_permissions=req.model_permissions,
+            expires_at=expires_marker,
+            active=req.active,
+        )
+        return {"ok": True, "api_key": updated}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="API Key 不存在")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@router.delete("/api-keys/{key_id}", dependencies=_deps)
+async def remove_api_key(key_id: str):
+    """Deactivate an external API key."""
+    try:
+        delete_external_api_key(key_id)
+        return {"ok": True}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="API Key 不存在")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 # ── Status ────────────────────────────────────────────────────────────────────

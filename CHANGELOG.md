@@ -4,6 +4,17 @@
 
 ---
 
+## [Unreleased] - QA
+
+### 🔧 OpenAI 兼容性修复
+
+- ✅ `/v1/models` 和 `/api/models` 增加 `smart` 伪模型，支持 OpenAI 兼容客户端先校验模型目录再发请求。
+- ✅ 模型目录返回稳定的 `provider/model-id` 规范 ID，并为不冲突的裸模型名提供兼容别名。
+- ✅ `/v1/chat/completions` 显式尊重请求里的 `model` 字段：`smart`/缺省走智能路由，`provider/model-id` 直接调用指定模型。
+- ✅ 未知模型和冲突裸模型名返回 400，避免静默路由到其他模型造成 verification 失败。
+
+---
+
 ## [v2.2.0] - 2026-04-16
 
 ### 🧹 仓库收敛与文档整合

@@ -867,6 +867,70 @@
           </div>
         </div>
 
+        <!-- External API Keys -->
+        <div class="mt-4 bg-white dark:bg-slate-800 rounded-xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300">外部连接 API Keys</h3>
+              <p class="text-xs text-slate-400 mt-1">为外部客户端配置名称、模型权限和截止时间。</p>
+            </div>
+            <button @click="loadApiKeys()" class="text-xs px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600">刷新</button>
+          </div>
+
+          <form @submit.prevent="createApiKey()" class="grid grid-cols-1 lg:grid-cols-[180px_1fr_220px_90px] gap-2 mb-4">
+            <input x-model="newApiKey.name" type="text" placeholder="名称，如 openlaw"
+              class="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm" required />
+            <input x-model="newApiKey.models" type="text" placeholder="模型权限，逗号分隔；* 表示全部"
+              class="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm font-mono" />
+            <input x-model="newApiKey.expires" type="datetime-local"
+              class="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm" />
+            <button type="submit" :disabled="loading"
+              class="bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white font-semibold py-2 rounded-lg text-sm">创建</button>
+          </form>
+
+          <div x-show="newApiKey.createdToken" class="mb-4 rounded-lg border border-emerald-200 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/30 p-3">
+            <p class="text-xs text-emerald-700 dark:text-emerald-300 mb-1">请立即保存，明文 API Key 只显示这一次。</p>
+            <code class="text-sm font-mono break-all text-emerald-800 dark:text-emerald-200" x-text="newApiKey.createdToken"></code>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="text-xs text-slate-400 border-b border-slate-200 dark:border-slate-700">
+                <tr>
+                  <th class="text-left py-2">名称</th>
+                  <th class="text-left py-2">Key</th>
+                  <th class="text-left py-2">模型权限</th>
+                  <th class="text-left py-2">截止时间</th>
+                  <th class="text-right py-2">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="k in apiKeys" :key="k.id">
+                  <tr class="border-b border-slate-100 dark:border-slate-700/60">
+                    <td class="py-2">
+                      <input x-model="k.name" class="w-36 px-2 py-1 rounded border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-xs" />
+                    </td>
+                    <td class="py-2 font-mono text-xs" x-text="k.key_preview"></td>
+                    <td class="py-2">
+                      <input :value="(k.model_permissions || ['*']).join(',')" @input="k.model_permissions = $event.target.value.split(',').map(x => x.trim()).filter(Boolean)"
+                        class="w-64 px-2 py-1 rounded border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-xs font-mono" />
+                    </td>
+                    <td class="py-2">
+                      <input :value="toDateTimeLocal(k.expires_at)" @input="k.expires_at_iso = $event.target.value"
+                        type="datetime-local" class="px-2 py-1 rounded border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-xs" />
+                    </td>
+                    <td class="py-2 text-right">
+                      <button @click="updateApiKey(k)" class="text-xs px-2 py-1 rounded bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 mr-1">保存</button>
+                      <button @click="deleteApiKey(k.id)" class="text-xs px-2 py-1 rounded bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300">停用</button>
+                    </td>
+                  </tr>
+                </template>
+                <tr x-show="apiKeys.length === 0"><td colspan="5" class="py-4 text-center text-slate-400">暂无外部 API Key</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <!-- GitHub link card -->
         <div class="mt-4 bg-gradient-to-r from-slate-800 to-slate-700 dark:from-slate-700 dark:to-slate-600 rounded-xl p-5 border border-slate-600">
           <div class="flex items-center justify-between">
@@ -1320,6 +1384,7 @@ function app() {
     updates: null,
     logs: [],
     logLines: '100',
+    apiKeys: [],
     providers: [],
     routing: null,
     routingStrategy: 'fallback',
@@ -1343,6 +1408,8 @@ function app() {
     benchmarkStatus: null,
     benchmarkSavedResults: null,
     _benchmarkPollTimer: null,
+    // External API key management state
+    newApiKey: { name: '', models: '*', expires: '', createdToken: '' },
 
     async init() {
       // Apply dark mode class
@@ -1409,14 +1476,14 @@ function app() {
       else if (p === 'usage') { await this.loadUsage(); this.$nextTick(() => this.renderChart()); }
       else if (p === 'savings') { await Promise.all([this.loadSavingsOverview(), this.loadSavings(), this.loadSavingsConfig()]); this.$nextTick(() => this.renderSavingsChart()); }
       else if (p === 'logs') await this.loadLogs();
-      else if (p === 'system') await Promise.all([this.loadConfig(), this.loadUpdates()]);
+      else if (p === 'system') await Promise.all([this.loadConfig(), this.loadUpdates(), this.loadApiKeys()]);
     },
 
     async refreshAll() {
       await Promise.all([this.loadStatus(), this.loadUsage(), this.loadConfig()]);
       if (this.page === 'routing') await this.loadRouting();
       if (this.page === 'logs') await this.loadLogs();
-      if (this.page === 'system') await this.loadUpdates();
+      if (this.page === 'system') await Promise.all([this.loadUpdates(), this.loadApiKeys()]);
       if (this.page === 'usage') this.$nextTick(() => this.renderChart());
       if (this.page === 'savings') { await Promise.all([this.loadSavingsOverview(), this.loadSavings(), this.loadSavingsConfig()]); this.$nextTick(() => this.renderSavingsChart()); }
     },
@@ -1484,6 +1551,85 @@ function app() {
         const res = await this.api('/api/admin/updates');
         if (res.ok) this.updates = await res.json();
       } catch (e) { console.warn('loadUpdates:', e); }
+    },
+
+    async loadApiKeys() {
+      try {
+        const res = await this.api('/api/admin/api-keys');
+        if (res.ok) {
+          const data = await res.json();
+          this.apiKeys = data.api_keys || [];
+        }
+      } catch (e) { console.warn('loadApiKeys:', e); }
+    },
+
+    toDateTimeLocal(ts) {
+      if (!ts) return '';
+      const d = new Date(ts * 1000);
+      const pad = n => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    },
+
+    async createApiKey() {
+      const models = (this.newApiKey.models || '*').split(',').map(x => x.trim()).filter(Boolean);
+      const body = { name: this.newApiKey.name, model_permissions: models.length ? models : ['*'] };
+      if (this.newApiKey.expires) body.expires_at_iso = this.newApiKey.expires;
+      this.loading = true;
+      try {
+        const res = await this.api('/api/admin/api-keys', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          this.newApiKey.createdToken = data.api_key.token;
+          this.newApiKey.name = '';
+          this.newApiKey.models = '*';
+          this.newApiKey.expires = '';
+          await this.loadApiKeys();
+          this.showToast('API Key 已创建');
+        } else {
+          const err = await res.json().catch(() => ({}));
+          this.showToast(err.detail || '创建失败', 'error');
+        }
+      } catch (e) { this.showToast('操作失败: ' + e.message, 'error'); }
+      finally { this.loading = false; }
+    },
+
+    async updateApiKey(k) {
+      const body = {
+        name: k.name,
+        model_permissions: k.model_permissions || ['*'],
+      };
+      if (k.expires_at_iso !== undefined) {
+        if (k.expires_at_iso) body.expires_at_iso = k.expires_at_iso;
+        else body.clear_expires_at = true;
+      }
+      try {
+        const res = await this.api('/api/admin/api-keys/' + encodeURIComponent(k.id), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (res.ok) { await this.loadApiKeys(); this.showToast('API Key 已更新'); }
+        else {
+          const err = await res.json().catch(() => ({}));
+          this.showToast(err.detail || '更新失败', 'error');
+        }
+      } catch (e) { this.showToast('操作失败: ' + e.message, 'error'); }
+    },
+
+    async deleteApiKey(id) {
+      if (!confirm('确认停用这个 API Key？')) return;
+      try {
+        const res = await this.api('/api/admin/api-keys/' + encodeURIComponent(id), { method: 'DELETE' });
+        if (res.ok) { await this.loadApiKeys(); this.showToast('API Key 已停用'); }
+        else {
+          const err = await res.json().catch(() => ({}));
+          this.showToast(err.detail || '停用失败', 'error');
+        }
+      } catch (e) { this.showToast('操作失败: ' + e.message, 'error'); }
     },
 
     async loadLogs() {

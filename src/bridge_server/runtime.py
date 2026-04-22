@@ -12,7 +12,7 @@ import os
 import time
 import importlib.util
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 import yaml
 
 # 启动时加载 .env 文件（~/.bridge-server/.env）
@@ -53,7 +53,7 @@ from .observability import (
     render_prometheus_metrics,
     setup_structured_logging,
 )
-from .services.routing import SmartRouter
+from .services.routing import RouteResult, SmartRouter
 from .services.savings import estimate_baseline_cost_rmb, estimate_model_cost_usd, resolve_baseline_model
 from .services.model_info import ModelInfoAggregator, set_model_info_aggregator, get_model_info_aggregator
 from .services.router_registry import RouterRegistry, set_router_registry, get_router_registry
@@ -385,6 +385,29 @@ async def require_auth(authorization: Optional[str] = Header(None)) -> Dict[str,
     return token_info
 
 
+def _ensure_model_allowed(
+    token_info: Dict[str, Any],
+    provider_id: str,
+    model_id: str,
+    requested_model: Optional[str] = None,
+) -> None:
+    """Enforce per-external-api-key model permissions."""
+    if token_info.get("type") != "external_api_key":
+        return
+
+    permissions = token_info.get("model_permissions") or []
+    full_model = f"{provider_id}/{model_id}"
+    requested = str(requested_model or "").strip()
+    allowed = {"*", full_model, model_id, f"{provider_id}/*"}
+    if not requested or requested == "smart":
+        allowed.add("smart")
+    if not any(str(item).strip() in allowed for item in permissions):
+        raise HTTPException(
+            status_code=403,
+            detail=f"API Key 无权访问模型 {full_model}",
+        )
+
+
 @app.middleware("http")
 async def observability_middleware(request: Request, call_next):
     """Observability middleware for tracing, metrics, and structured request logs."""
@@ -552,19 +575,69 @@ async def _collect_metrics_snapshot() -> Dict[str, Any]:
 def _build_model_catalog() -> List[Dict[str, Any]]:
     """Build a user-facing model catalog from the active providers."""
     if not provider_manager:
-        return []
+        return [
+            {
+                "id": "smart",
+                "object": "model",
+                "created": int(time.time()),
+                "owned_by": "bridge-server",
+                "provider": "bridge-server",
+                "canonical_id": "smart",
+                "is_alias": False,
+            }
+        ]
 
     models: List[Dict[str, Any]] = []
+    created = int(time.time())
+    bare_name_counts: Dict[str, int] = {}
+    provider_models: List[Tuple[str, str, Any]] = []
+
     for provider_id, provider in provider_manager.providers.items():
         for model_id in provider.get_supported_models():
+            bare_name_counts[model_id] = bare_name_counts.get(model_id, 0) + 1
             model_info = provider.get_model_info(model_id)
+            provider_models.append((provider_id, model_id, model_info))
+
+    models.append(
+        {
+            "id": "smart",
+            "object": "model",
+            "created": created,
+            "owned_by": "bridge-server",
+            "provider": "bridge-server",
+            "canonical_id": "smart",
+            "is_alias": False,
+            "description": "Bridge Server smart routing pseudo-model",
+        }
+    )
+
+    for provider_id, model_id, model_info in provider_models:
+        canonical_id = f"{provider_id}/{model_id}"
+        entry = {
+            "id": canonical_id,
+            "provider": provider_id,
+            "object": "model",
+            "created": created,
+            "owned_by": provider_id,
+            "canonical_id": canonical_id,
+            "is_alias": False,
+            "input_cost_per_1k": getattr(model_info, "input_cost_per_1k", None),
+            "output_cost_per_1k": getattr(model_info, "output_cost_per_1k", None),
+            "max_tokens": getattr(model_info, "max_tokens", None),
+            "context_window": getattr(model_info, "context_window", None),
+        }
+        models.append(entry)
+
+        if bare_name_counts.get(model_id) == 1:
             models.append(
                 {
                     "id": model_id,
                     "provider": provider_id,
                     "object": "model",
-                    "created": int(time.time()),
+                    "created": created,
                     "owned_by": provider_id,
+                    "canonical_id": canonical_id,
+                    "is_alias": True,
                     "input_cost_per_1k": getattr(model_info, "input_cost_per_1k", None),
                     "output_cost_per_1k": getattr(model_info, "output_cost_per_1k", None),
                     "max_tokens": getattr(model_info, "max_tokens", None),
@@ -573,6 +646,57 @@ def _build_model_catalog() -> List[Dict[str, Any]]:
             )
 
     return models
+
+
+def _split_model_ref(model_ref: str) -> Tuple[Optional[str], str]:
+    """Split a provider-qualified model ref while preserving slashes inside model IDs."""
+    value = (model_ref or "").strip()
+    if "/" not in value:
+        return None, value
+    provider_id, model_id = value.split("/", 1)
+    return provider_id.strip() or None, model_id.strip()
+
+
+def _resolve_requested_model(model_ref: Optional[str], manager: ProviderManager) -> Optional[RouteResult]:
+    """Resolve the OpenAI `model` field into a direct provider/model route.
+
+    Returns None for missing or `smart`, which means the smart router should be used.
+    """
+    requested_model = str(model_ref or "").strip()
+    if not requested_model or requested_model == "smart":
+        return None
+
+    provider_id, model_id = _split_model_ref(requested_model)
+    all_models = manager.get_provider_models()
+
+    if provider_id:
+        if provider_id not in all_models:
+            raise HTTPException(status_code=400, detail=f"未知 Provider: {provider_id}")
+        if model_id not in all_models.get(provider_id, []):
+            raise HTTPException(status_code=400, detail=f"Provider {provider_id} 不支持模型 {model_id}")
+        return RouteResult(
+            provider_id=provider_id,
+            model=model_id,
+            task_type="direct",
+            confidence=1.0,
+            reason=f"客户端指定模型: {provider_id}/{model_id}",
+        )
+
+    matches = [(pid, models) for pid, models in all_models.items() if model_id in models]
+    if not matches:
+        raise HTTPException(status_code=400, detail=f"未知模型: {model_id}")
+    if len(matches) > 1:
+        candidates = ", ".join(f"{pid}/{model_id}" for pid, _models in matches)
+        raise HTTPException(status_code=400, detail=f"模型名不唯一，请使用 provider/model: {candidates}")
+
+    matched_provider = matches[0][0]
+    return RouteResult(
+        provider_id=matched_provider,
+        model=model_id,
+        task_type="direct",
+        confidence=1.0,
+        reason=f"客户端指定裸模型名，匹配为: {matched_provider}/{model_id}",
+    )
 
 
 @app.get("/metrics")
@@ -727,52 +851,55 @@ async def chat_completions(
         if not smart_router or not provider_manager:
             raise HTTPException(status_code=500, detail="系统组件未初始化")
 
-        # 优先使用自定义路由器（如果已激活）
-        route_result = None
-        _registry = get_router_registry()
-        _active_router = _registry.get_active() if _registry else None
+        # 1) 优先解析用户明确指定的 model（provider/model 或 model_id）
+        requested_model = req_dict.get("model")
+        route_result = _resolve_requested_model(requested_model, provider_manager)
 
-        if _active_router and _registry:
-            _aggregator = get_model_info_aggregator()
-            _model_list = _aggregator.get_snapshot() if _aggregator else []
-            _ctx = RoutingContext(
-                last_user_message=next(
-                    (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
-                    "",
-                ),
-                messages_count=len(messages),
-                models=_model_list,
-                session_metadata={
-                    "user_id": current_user.get("user_id"),
-                    "user_domain": current_user.get("domain", "general"),
-                },
-            )
-            _ok, _result = await _registry.execute(_active_router, _ctx)
-            if _ok and isinstance(_result, RoutingDecision):
-                from .services.routing.router import RouteResult  # local import to avoid circular
-                route_result = RouteResult(
-                    provider_id=_result.provider,
-                    model=_result.model,
-                    task_type="custom",
-                    confidence=_result.confidence,
-                    reason=_result.reason,
-                    from_cache=False,
-                )
-                logger.info(
-                    "custom_router_selected",
-                    router=_active_router,
-                    provider=_result.provider,
-                    model=_result.model,
-                    confidence=round(_result.confidence, 3),
-                    reason=_result.reason,
-                )
-            else:
-                logger.warning(
-                    "custom_router_fallback",
-                    router=_active_router,
-                    error=str(_result),
-                )
+        # 2) 若无直接指定，尝试自定义路由器框架
+        if route_result is None:
+            _registry = get_router_registry()
+            _active_router = _registry.get_active() if _registry else None
 
+            if _active_router and _registry:
+                _aggregator = get_model_info_aggregator()
+                _model_list = _aggregator.get_snapshot() if _aggregator else []
+                _ctx = RoutingContext(
+                    last_user_message=next(
+                        (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
+                        "",
+                    ),
+                    messages_count=len(messages),
+                    models=_model_list,
+                    session_metadata={
+                        "user_id": current_user.get("user_id"),
+                        "user_domain": current_user.get("domain", "general"),
+                    },
+                )
+                _ok, _result = await _registry.execute(_active_router, _ctx)
+                if _ok and isinstance(_result, RoutingDecision):
+                    from .services.routing.router import RouteResult  # local import to avoid circular
+                    route_result = RouteResult(
+                        provider_id=_result.provider,
+                        model=_result.model,
+                        task_type="custom",
+                        confidence=_result.confidence,
+                        reason=_result.reason,
+                        from_cache=False,
+                    )
+                    logger.info(
+                        "custom_router_selected",
+                        router=_active_router,
+                        provider=_result.provider,
+                        model=_result.model,
+                        confidence=round(_result.confidence, 3),
+                        reason=_result.reason,
+                    )
+                else:
+                    logger.warning(
+                        "custom_router_fallback",
+                        router=_active_router,
+                        error=str(_result),
+                    )
         if route_result is None:
             route_result = await smart_router.route(
                 messages=messages,
@@ -802,6 +929,7 @@ async def chat_completions(
             from_cache=route_result.from_cache,
             duration_ms=round(route_time, 2),
         )
+        _ensure_model_allowed(_auth, route_result.provider_id, route_result.model, requested_model)
         
         # 4. 执行模型调用
         perf_llm_start = time.perf_counter()

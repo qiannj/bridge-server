@@ -38,3 +38,36 @@ def test_web_ui_rehydrates_panel_token_from_session_storage():
 
     assert "token: sessionStorage.getItem('panel_token') || ''" in html
     assert "await this.login(true);" in html
+
+
+def test_external_api_key_create_update_and_deactivate(monkeypatch, tmp_path):
+    monkeypatch.setenv("BRIDGE_SERVER_CONFIG_DIR", str(tmp_path))
+    now = 1000.0
+    monkeypatch.setattr(admin_api.time, "time", lambda: now)
+
+    created = admin_api.create_external_api_key(
+        name="openlaw",
+        model_permissions=["scnet/Qwen3-235B-A22B"],
+        expires_at=now + 3600,
+    )
+    assert created["token"].startswith("sk-")
+    assert created["name"] == "openlaw"
+    assert created["model_permissions"] == ["scnet/Qwen3-235B-A22B"]
+    assert created["expires_at"] == now + 3600
+
+    listed = admin_api.list_external_api_keys()
+    assert len(listed) == 1
+    assert listed[0]["key_preview"].startswith("sk-")
+
+    updated = admin_api.update_external_api_key(
+        listed[0]["id"],
+        name="openlaw-prod",
+        model_permissions=["*"],
+        expires_at=None,
+    )
+    assert updated["name"] == "openlaw-prod"
+    assert updated["model_permissions"] == ["*"]
+    assert updated["expires_at"] is None
+
+    admin_api.delete_external_api_key(listed[0]["id"])
+    assert admin_api.list_external_api_keys()[0]["active"] is False
