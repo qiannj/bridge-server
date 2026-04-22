@@ -1063,7 +1063,13 @@ async def _stream_chat_completion(
     req_dict: Dict[str, Any],
     perf_start: float
 ):
-    """流式聊天完成，支持 reasoning_content（思维链模型）实时流出"""
+    """流式聊天完成，支持 reasoning_content（思维链模型）实时流出。
+
+    失败降级策略：
+    - 若流式失败且尚未向客户端发送任何内容，自动降级为非流式请求，
+      将结果转成 SSE 格式推出，客户端无感知。
+    - 若已发送部分内容后失败，推送 stream_error 事件（无法回滚）。
+    """
     llm_start = time.perf_counter()
 
     routing_info = {
@@ -1075,107 +1081,188 @@ async def _stream_chat_completion(
         "confidence": route_result.confidence,
     }
 
+    if not provider_manager:
+        error_chunk = {"error": {"message": "Provider管理器未初始化", "type": "stream_error"}}
+        yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
+        return
+
+    content_chunks_sent = 0  # 记录已发送的含内容 chunk 数量（用于判断是否可降级）
+    first_chunk = True
+    prompt_tokens = 0
+    completion_tokens = 0
+    reasoning_chars = 0
+    stream_err: Optional[Exception] = None
+
     try:
-        if not provider_manager:
-            raise RuntimeError("Provider管理器未初始化")
-
-        first_chunk = True
-        prompt_tokens = 0
-        completion_tokens = 0
-        reasoning_chars = 0  # 追踪 reasoning_content 总长度（用于日志）
-
         async for chunk in provider_manager.chat_completion_stream(
             messages=messages,
             model=route_result.model,
             provider_id=route_result.provider_id,
             max_tokens=req_dict.get("max_tokens", 4000),
             temperature=req_dict.get("temperature", 0.7),
-            stream_options={"include_usage": True},  # 要求上游在流结束时返回 usage
+            stream_options={"include_usage": True},
         ):
-            # 解析 chunk
             if isinstance(chunk, str):
                 try:
                     payload = json.loads(chunk)
                 except json.JSONDecodeError:
                     yield f"data: {chunk}\n\n"
+                    content_chunks_sent += 1
                     continue
             else:
                 payload = chunk
 
-            # 累计 token 使用量（上游在最后一个 chunk 携带 usage 字段）
             if isinstance(payload, dict) and "usage" in payload and payload["usage"]:
                 usage = payload["usage"]
                 prompt_tokens = usage.get("prompt_tokens", prompt_tokens)
                 completion_tokens = usage.get("completion_tokens", completion_tokens)
 
-            # 统计 reasoning_content 字符数（用于日志）
             if isinstance(payload, dict):
                 for choice in payload.get("choices", []):
                     delta = choice.get("delta", {})
                     rc = delta.get("reasoning_content") or ""
                     reasoning_chars += len(rc)
+                    # 只有携带实际内容的 chunk 才计数
+                    if delta.get("content") or delta.get("reasoning_content"):
+                        content_chunks_sent += 1
 
-            # 将路由信息注入到第一个有效 chunk（让客户端知道路由决策）
             if first_chunk and isinstance(payload, dict):
                 first_chunk = False
-                # usage 可能是 null（NVIDIA 流式第一帧），需显式覆盖
                 if not isinstance(payload.get("usage"), dict):
                     payload["usage"] = {}
                 payload["usage"]["routing"] = routing_info
 
             yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
+    except Exception as e:
+        stream_err = e
+
+    if stream_err is not None:
         llm_time = (time.perf_counter() - llm_start) * 1000
         metrics_collector.record_llm_call(
-            route_result.provider_id,
-            route_result.model,
-            "success",
-            llm_time / 1000,
+            route_result.provider_id, route_result.model, "error", llm_time / 1000,
         )
-        if completion_tokens:
-            metrics_collector.record_token_usage(
-                route_result.provider_id,
-                route_result.model,
-                prompt_tokens,
-                completion_tokens,
+
+        if content_chunks_sent == 0:
+            # ── 降级到非流式 ──────────────────────────────────────────────
+            logger.warning(
+                "stream_failed_before_content_fallback_to_non_stream",
+                provider=route_result.provider_id,
+                model=route_result.model,
+                error=str(stream_err),
             )
+            try:
+                response = await provider_manager.chat_completion(
+                    messages=messages,
+                    model=route_result.model,
+                    provider_id=route_result.provider_id,
+                    max_tokens=req_dict.get("max_tokens", 4000),
+                    temperature=req_dict.get("temperature", 0.7),
+                    stream=False,
+                )
+                # 将非流式响应转成两个 SSE chunk（content delta + stop）
+                resp_id = response.get("id") or f"chatcmpl-fallback-{int(time.time())}"
+                resp_created = response.get("created") or int(time.time())
+                resp_model = response.get("model") or route_result.model
+                choice0 = (response.get("choices") or [{}])[0]
+                message = choice0.get("message") or {}
+                content = message.get("content") or ""
+                reasoning = message.get("reasoning_content") or ""
 
-        asyncio.create_task(_record_usage_background(
-            route_result=route_result,
-            usage_info={"completion_tokens": completion_tokens, "prompt_tokens": prompt_tokens},
-            current_user=current_user,
-            duration_ms=llm_time
-        ))
+                usage_info = response.get("usage") or {}
+                prompt_tokens = usage_info.get("prompt_tokens", 0)
+                completion_tokens = usage_info.get("completion_tokens", 0)
 
-        # 发送结束标记
-        yield "data: [DONE]\n\n"
+                delta_payload: Dict[str, Any] = {
+                    "id": resp_id,
+                    "object": "chat.completion.chunk",
+                    "created": resp_created,
+                    "model": resp_model,
+                    "choices": [{
+                        "index": 0,
+                        "delta": {"role": "assistant", "content": content},
+                        "finish_reason": None,
+                    }],
+                    "usage": {**usage_info, "routing": routing_info, "fallback": True},
+                }
+                if reasoning:
+                    delta_payload["choices"][0]["delta"]["reasoning_content"] = reasoning
 
-        total_time = (time.perf_counter() - perf_start) * 1000
-        logger.info(
-            "stream_completion_finished",
-            provider=route_result.provider_id,
-            model=route_result.model,
-            total_duration_ms=round(total_time, 2),
-            llm_duration_ms=round(llm_time, 2),
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            reasoning_chars=reasoning_chars,
+                yield f"data: {json.dumps(delta_payload, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'id': resp_id, 'object': 'chat.completion.chunk', 'created': resp_created, 'model': resp_model, 'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'stop'}]}, ensure_ascii=False)}\n\n"
+                yield "data: [DONE]\n\n"
+
+                llm_time = (time.perf_counter() - llm_start) * 1000
+                metrics_collector.record_llm_call(
+                    route_result.provider_id, route_result.model, "success", llm_time / 1000,
+                )
+                if completion_tokens:
+                    metrics_collector.record_token_usage(
+                        route_result.provider_id, route_result.model,
+                        prompt_tokens, completion_tokens,
+                    )
+                asyncio.create_task(_record_usage_background(
+                    route_result=route_result,
+                    usage_info=usage_info,
+                    current_user=current_user,
+                    duration_ms=llm_time,
+                ))
+                logger.info(
+                    "stream_fallback_non_stream_success",
+                    provider=route_result.provider_id,
+                    model=route_result.model,
+                    content_len=len(content),
+                )
+                return
+
+            except Exception as fallback_err:
+                logger.error(
+                    "stream_and_fallback_both_failed",
+                    provider=route_result.provider_id,
+                    model=route_result.model,
+                    stream_error=str(stream_err),
+                    fallback_error=str(fallback_err),
+                )
+                error_chunk = {
+                    "error": {"message": str(stream_err), "type": "stream_error", "fallback_error": str(fallback_err)}
+                }
+                yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
+                return
+        else:
+            # 已发出部分内容，无法回滚，直接报错
+            error_chunk = {"error": {"message": str(stream_err), "type": "stream_error"}}
+            yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
+            return
+
+    # ── 正常流式完成 ─────────────────────────────────────────────────────────
+    llm_time = (time.perf_counter() - llm_start) * 1000
+    metrics_collector.record_llm_call(
+        route_result.provider_id, route_result.model, "success", llm_time / 1000,
+    )
+    if completion_tokens:
+        metrics_collector.record_token_usage(
+            route_result.provider_id, route_result.model, prompt_tokens, completion_tokens,
         )
+    asyncio.create_task(_record_usage_background(
+        route_result=route_result,
+        usage_info={"completion_tokens": completion_tokens, "prompt_tokens": prompt_tokens},
+        current_user=current_user,
+        duration_ms=llm_time,
+    ))
 
-    except Exception as e:
-        metrics_collector.record_llm_call(
-            route_result.provider_id,
-            route_result.model,
-            "error",
-            max((time.perf_counter() - llm_start), 0.0),
-        )
-        error_chunk = {
-            "error": {
-                "message": str(e),
-                "type": "stream_error"
-            }
-        }
-        yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
+    yield "data: [DONE]\n\n"
+
+    total_time = (time.perf_counter() - perf_start) * 1000
+    logger.info(
+        "stream_completion_finished",
+        provider=route_result.provider_id,
+        model=route_result.model,
+        total_duration_ms=round(total_time, 2),
+        llm_duration_ms=round(llm_time, 2),
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        reasoning_chars=reasoning_chars,
+    )
 
 
 async def _record_usage_background(
