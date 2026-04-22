@@ -1231,15 +1231,35 @@ async def _record_usage_background(
 
 
 @app.get("/v1/models")
-async def list_models():
-    """列出可用模型"""
-    
+async def list_models(
+    _auth: Dict[str, Any] = Depends(require_auth),
+):
+    """列出可用模型（需要认证；外部 API Key 仅返回其有权限的模型）"""
+
     if not provider_manager:
         return {"data": []}
-    
+
     try:
-        return {"data": _build_model_catalog()}
-        
+        all_models = _build_model_catalog()
+
+        # External API keys only see models they are permitted to use.
+        if _auth.get("type") == "external_api_key":
+            permissions = _auth.get("model_permissions") or []
+            if "*" not in permissions:
+                def _allowed(entry: Dict[str, Any]) -> bool:
+                    mid = entry.get("id", "")
+                    cid = entry.get("canonical_id", mid)
+                    pid = entry.get("provider", "")
+                    return (
+                        mid == "smart"
+                        or mid in permissions
+                        or cid in permissions
+                        or f"{pid}/*" in permissions
+                    )
+                all_models = [m for m in all_models if _allowed(m)]
+
+        return {"data": all_models}
+
     except Exception as e:
         logger.error(f"获取模型列表失败: {str(e)}")
         return {"data": [], "error": str(e)}
