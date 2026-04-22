@@ -732,6 +732,9 @@ def _inject_fallback_into_response(response: Dict[str, Any], text: str) -> None:
     message["content"] = text
     message["role"] = "assistant"
     choices[0]["finish_reason"] = "stop"
+
+
+def _resolve_requested_model(model_ref: Optional[str], manager: ProviderManager) -> Optional[RouteResult]:
     """Resolve the OpenAI `model` field into a direct provider/model route.
 
     Returns None for missing or `smart`, which means the smart router should be used.
