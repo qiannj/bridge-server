@@ -618,6 +618,99 @@ async def reload_config():
     return {"ok": True, "reloaded": reloaded}
 
 
+# ── 旁路模型路由器配置 ─────────────────────────────────────────────────────────
+
+class BypassRouterConfig(BaseModel):
+    enabled: bool = False
+    routing_model: str = ""
+    routing_rules: str = "根据任务类型选择最合适的模型"
+    routing_prompt: Optional[str] = None
+    compress_prompt: Optional[str] = None
+    timeout_ms: int = 3000
+    compress_context_threshold: int = 10
+
+
+@router.get("/bypass-router", dependencies=_deps)
+async def get_bypass_router_config():
+    """获取旁路模型路由器配置。"""
+    config = _load_yaml(_get_config_dir() / "config.yaml")
+    defaults: Dict[str, Any] = {
+        "enabled": False,
+        "routing_model": "",
+        "routing_rules": "根据任务类型选择最合适的模型",
+        "timeout_ms": 3000,
+        "compress_context_threshold": 10,
+    }
+    return {**defaults, **config.get("bypass_router", {})}
+
+
+@router.put("/bypass-router", dependencies=_deps)
+async def update_bypass_router_config(req: BypassRouterConfig):
+    """更新旁路模型路由器配置并热重载。"""
+    config_file = _get_config_dir() / "config.yaml"
+    config = _load_yaml(config_file)
+    new_cfg: Dict[str, Any] = {
+        "enabled": req.enabled,
+        "routing_model": req.routing_model,
+        "routing_rules": req.routing_rules,
+        "timeout_ms": req.timeout_ms,
+        "compress_context_threshold": req.compress_context_threshold,
+    }
+    if req.routing_prompt:
+        new_cfg["routing_prompt"] = req.routing_prompt
+    if req.compress_prompt:
+        new_cfg["compress_prompt"] = req.compress_prompt
+    config["bypass_router"] = new_cfg
+    _save_yaml(config_file, config)
+    # 热重载
+    try:
+        from bridge_server.services.bypass_router import BypassRouter as _BR
+        from bridge_server.services.bypass_router import get_bypass_router as _get_br
+        from bridge_server.services.bypass_router import set_bypass_router as _set_br
+        existing = _get_br()
+        if existing is not None:
+            existing.reload(new_cfg)
+        else:
+            _set_br(_BR(new_cfg))
+    except Exception:
+        pass
+    return {"ok": True}
+
+
+class BypassRouterTestRequest(BaseModel):
+    messages: List[Dict[str, Any]] = Field(
+        default=[{"role": "user", "content": "帮我写一个 Python 快速排序算法"}]
+    )
+
+
+@router.post("/bypass-router/test", dependencies=_deps)
+async def test_bypass_router(req: BypassRouterTestRequest):
+    """使用当前配置对给定消息执行一次旁路路由测试。"""
+    try:
+        from bridge_server import runtime as _rt
+        from bridge_server.services.bypass_router import get_bypass_router as _get_br
+        br = _get_br()
+        if br is None:
+            return {"ok": False, "error": "旁路路由器未初始化"}
+        if not br.enabled:
+            return {"ok": False, "error": "旁路路由器未启用，请先在配置中开启"}
+        if _rt.provider_manager is None:
+            return {"ok": False, "error": "ProviderManager 未初始化"}
+        result, compressed_msgs = await br.route(req.messages, _rt.provider_manager)
+        if result is None:
+            return {"ok": False, "error": "路由决策失败（模型未响应或响应格式无效）"}
+        return {
+            "ok": True,
+            "selected_model": f"{result.provider_id}/{result.model}",
+            "reason": result.reason,
+            "context_compressed": len(compressed_msgs) < len(req.messages),
+            "original_message_count": len(req.messages),
+            "compressed_message_count": len(compressed_msgs),
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 # ── Usage ─────────────────────────────────────────────────────────────────────
 
 def _query_usage(period: str = "today") -> Dict[str, Any]:

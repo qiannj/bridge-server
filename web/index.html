@@ -511,6 +511,140 @@
         </div>
       </div>
 
+      <!-- ── BYPASS ROUTER ── -->
+      <div x-show="page === 'bypass-router'" x-cloak>
+
+        <!-- Info banner -->
+        <div class="mb-4 flex items-start gap-3 p-4 bg-purple-50 dark:bg-purple-900/20 rounded-xl border border-purple-200 dark:border-purple-800">
+          <span class="text-2xl flex-shrink-0">🧠</span>
+          <div>
+            <p class="text-sm font-semibold text-purple-900 dark:text-purple-200">旁路模型路由器</p>
+            <p class="text-xs text-purple-700 dark:text-purple-300 mt-0.5">指定一个 LLM 作为路由决策模型，根据你的路由规则自动选择最合适的执行模型，并可选地对长对话上下文进行压缩后再发送。优先级高于场景路由，低于客户端明确指定的 model。</p>
+          </div>
+        </div>
+
+        <!-- Config card -->
+        <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm mb-4">
+          <div class="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-700">
+            <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300">路由器设置</h3>
+            <div class="flex items-center gap-2">
+              <!-- Enable toggle -->
+              <span class="text-xs text-slate-500 dark:text-slate-400">启用</span>
+              <button
+                @click="bypassRouter.enabled = !bypassRouter.enabled"
+                :class="bypassRouter.enabled ? 'bg-purple-500' : 'bg-slate-300 dark:bg-slate-600'"
+                class="relative inline-flex h-5 w-9 flex-shrink-0 rounded-full transition-colors duration-200 focus:outline-none"
+              >
+                <span :class="bypassRouter.enabled ? 'translate-x-4' : 'translate-x-0'" class="inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200"></span>
+              </button>
+            </div>
+          </div>
+
+          <div class="px-5 py-5 space-y-5">
+            <!-- Routing model -->
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">路由决策模型 <span class="text-slate-400 font-normal">（格式：provider/model-id）</span></label>
+              <div class="flex gap-2">
+                <select
+                  x-model="bypassRouter.routing_model"
+                  class="flex-1 px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 focus:ring-2 focus:ring-purple-500"
+                >
+                  <option value="">— 请选择路由模型 —</option>
+                  <template x-for="m in allModels" :key="m">
+                    <option :value="m" x-text="m"></option>
+                  </template>
+                </select>
+                <input
+                  type="text"
+                  x-model="bypassRouter.routing_model"
+                  placeholder="或手动输入 provider/model"
+                  class="flex-1 px-3 py-2 text-sm font-mono rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+              <p class="text-xs text-slate-400 mt-1">建议使用低成本快速模型（如 dashscope/qwen3.5-flash），路由本身会额外消耗少量 token。</p>
+            </div>
+
+            <!-- Routing rules -->
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">路由规则 <span class="text-slate-400 font-normal">（自然语言描述，将注入路由提示词）</span></label>
+              <textarea
+                x-model="bypassRouter.routing_rules"
+                rows="4"
+                placeholder="例如：&#10;- 代码生成任务优先选 dashscope/qwen3-coder-plus&#10;- 需要长文本或创意写作时选 moonshot/kimi-chat&#10;- 其他通用任务使用 dashscope/qwen3.5-plus"
+                class="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 focus:ring-2 focus:ring-purple-500 font-mono resize-y"
+              ></textarea>
+            </div>
+
+            <!-- Advanced settings row -->
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">路由超时 (ms)</label>
+                <input
+                  type="number"
+                  x-model.number="bypassRouter.timeout_ms"
+                  min="500" max="30000" step="500"
+                  class="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 focus:ring-2 focus:ring-purple-500"
+                />
+                <p class="text-xs text-slate-400 mt-1">超时后自动降级到场景路由</p>
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">上下文压缩阈值（消息数）</label>
+                <input
+                  type="number"
+                  x-model.number="bypassRouter.compress_context_threshold"
+                  min="2" max="200" step="1"
+                  class="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 focus:ring-2 focus:ring-purple-500"
+                />
+                <p class="text-xs text-slate-400 mt-1">超过此数量才允许路由器建议压缩上下文</p>
+              </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="flex items-center gap-3 pt-2 border-t border-slate-100 dark:border-slate-700">
+              <button @click="saveBypassRouter()" :disabled="loading"
+                class="px-5 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors">
+                💾 保存配置
+              </button>
+              <button @click="testBypassRouter()" :disabled="bypassRouterTesting || !bypassRouter.enabled"
+                class="px-5 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50 text-slate-700 dark:text-slate-300 text-sm font-semibold rounded-lg transition-colors flex items-center gap-2">
+                <span x-show="bypassRouterTesting" class="w-4 h-4 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></span>
+                🧪 测试路由
+              </button>
+              <span x-show="!bypassRouter.enabled" class="text-xs text-slate-400 italic">启用后才可测试</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Test result -->
+        <div x-show="bypassRouterTestResult" x-cloak
+          :class="bypassRouterTestResult?.ok ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20' : 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20'"
+          class="rounded-xl border p-4">
+          <template x-if="bypassRouterTestResult?.ok">
+            <div class="space-y-2">
+              <div class="flex items-center gap-2">
+                <span class="text-emerald-500 font-bold">✅</span>
+                <span class="text-sm font-semibold text-emerald-800 dark:text-emerald-300">路由测试成功</span>
+              </div>
+              <div class="text-xs text-slate-600 dark:text-slate-300 space-y-1">
+                <p>🎯 选中模型：<code class="font-mono bg-white dark:bg-slate-800 px-1.5 py-0.5 rounded" x-text="bypassRouterTestResult?.selected_model"></code></p>
+                <p>💬 决策理由：<span x-text="bypassRouterTestResult?.reason"></span></p>
+                <p x-show="bypassRouterTestResult?.context_compressed">✂️ 上下文已压缩（<span x-text="bypassRouterTestResult?.original_message_count"></span> → <span x-text="bypassRouterTestResult?.compressed_message_count"></span> 条消息）</p>
+              </div>
+            </div>
+          </template>
+          <template x-if="!bypassRouterTestResult?.ok">
+            <div class="flex items-start gap-2">
+              <span class="text-red-500">❌</span>
+              <div>
+                <p class="text-sm font-semibold text-red-700 dark:text-red-400">测试失败</p>
+                <p class="text-xs text-red-600 dark:text-red-300 mt-1" x-text="bypassRouterTestResult?.error"></p>
+              </div>
+            </div>
+          </template>
+        </div>
+
+      </div>
+
       <!-- ── SAVINGS ── -->
       <div x-show="page === 'savings'" x-cloak>
 
@@ -1365,6 +1499,7 @@ function app() {
       { id: 'dashboard', label: '仪表盘', icon: '📊' },
       { id: 'providers', label: 'Providers', icon: '🔌' },
       { id: 'routing', label: '路由配置', icon: '🔀' },
+      { id: 'bypass-router', label: '旁路路由器', icon: '🧠' },
       { id: 'usage', label: '用量统计', icon: '📈' },
       { id: 'savings', label: '降本看板', icon: '💰' },
       { id: 'logs', label: '日志', icon: '📋' },
@@ -1410,6 +1545,10 @@ function app() {
     _benchmarkPollTimer: null,
     // External API key management state
     newApiKey: { name: '', models: '*', expires: '', createdToken: '' },
+    // Bypass router state
+    bypassRouter: { enabled: false, routing_model: '', routing_rules: '', timeout_ms: 3000, compress_context_threshold: 10 },
+    bypassRouterTestResult: null,
+    bypassRouterTesting: false,
 
     async init() {
       // Apply dark mode class
@@ -1473,6 +1612,7 @@ function app() {
       if (p === 'dashboard') await Promise.all([this.loadStatus(), this.loadUsage()]);
       else if (p === 'providers') await Promise.all([this.loadConfig(), this.loadStatus(), this.loadBenchmarkResults()]);
       else if (p === 'routing') await Promise.all([this.loadConfig(), this.loadRouting()]);
+      else if (p === 'bypass-router') await this.loadBypassRouter();
       else if (p === 'usage') { await this.loadUsage(); this.$nextTick(() => this.renderChart()); }
       else if (p === 'savings') { await Promise.all([this.loadSavingsOverview(), this.loadSavings(), this.loadSavingsConfig()]); this.$nextTick(() => this.renderSavingsChart()); }
       else if (p === 'logs') await this.loadLogs();
@@ -1828,6 +1968,52 @@ function app() {
       const s = { ...this.routingScenarios };
       delete s[key];
       this.routingScenarios = s;
+    },
+
+    // ── Bypass Router ──────────────────────────────────────────────────────
+
+    async loadBypassRouter() {
+      try {
+        const res = await this.api('/api/admin/bypass-router');
+        if (res.ok) this.bypassRouter = await res.json();
+      } catch (e) { console.warn('loadBypassRouter:', e); }
+    },
+
+    async saveBypassRouter() {
+      this.loading = true;
+      try {
+        const res = await this.api('/api/admin/bypass-router', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.bypassRouter),
+        });
+        if (res.ok) this.showToast('旁路路由器配置已保存');
+        else {
+          const err = await res.json().catch(() => ({}));
+          this.showToast(err.detail || '保存失败', 'error');
+        }
+      } catch (e) {
+        this.showToast('操作失败: ' + e.message, 'error');
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    async testBypassRouter() {
+      this.bypassRouterTesting = true;
+      this.bypassRouterTestResult = null;
+      try {
+        const res = await this.api('/api/admin/bypass-router/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages: [{ role: 'user', content: '帮我写一个 Python 快速排序算法' }] }),
+        });
+        this.bypassRouterTestResult = await res.json();
+      } catch (e) {
+        this.bypassRouterTestResult = { ok: false, error: e.message };
+      } finally {
+        this.bypassRouterTesting = false;
+      }
     },
 
     showToast(msg, type = 'success') {

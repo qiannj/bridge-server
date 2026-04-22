@@ -60,6 +60,7 @@ from .services.router_registry import RouterRegistry, set_router_registry, get_r
 from .router_sdk import RoutingContext, RoutingDecision
 from .utils.cache import HybridCache
 from .utils.connection_pools import close_connection_pool_manager, get_connection_pool_manager
+from .services.bypass_router import BypassRouter, get_bypass_router, set_bypass_router
 
 # 异步模块
 from .auth import get_auth_manager, get_current_user_async, AsyncAuthManager
@@ -326,6 +327,16 @@ async def initialize_system():
         logger.info(f"自定义路由器 '{active}' 已加载")
     else:
         logger.info("无激活的自定义路由器，使用内置 SmartRouter")
+
+    # 8. 初始化旁路模型路由器
+    bypass_cfg = runtime_config.get("bypass_router", {})
+    bypass_router_inst = BypassRouter(bypass_cfg)
+    set_bypass_router(bypass_router_inst)
+    logger.info(
+        "旁路模型路由器已初始化",
+        enabled=bypass_router_inst.enabled,
+        routing_model=bypass_router_inst.routing_model or "(未配置)",
+    )
 
 
 # FastAPI应用
@@ -866,6 +877,23 @@ async def chat_completions(
         # 1) 优先解析用户明确指定的 model（provider/model 或 model_id）
         requested_model = req_dict.get("model")
         route_result = _resolve_requested_model(requested_model, provider_manager)
+
+        # 1.5) 旁路模型路由器（用户配置的 LLM 路由决策 + 可选上下文压缩）
+        if route_result is None:
+            _br = get_bypass_router()
+            if _br and _br.enabled:
+                try:
+                    _br_result, messages = await _br.route(messages, provider_manager)
+                    if _br_result is not None:
+                        route_result = _br_result
+                        logger.info(
+                            "bypass_router_selected",
+                            provider=_br_result.provider_id,
+                            model=_br_result.model,
+                            reason=_br_result.reason,
+                        )
+                except Exception as _br_exc:
+                    logger.warning("bypass_router_error", error=str(_br_exc))
 
         # 2) 若无直接指定，尝试自定义路由器框架
         if route_result is None:

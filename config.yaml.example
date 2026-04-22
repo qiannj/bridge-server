@@ -134,3 +134,23 @@ metrics:
   enabled: true
   export_prometheus: false
   prometheus_port: 9090
+
+# 旁路模型路由器
+# 通过指定的 LLM 对每条请求做动态路由决策，并可压缩过长上下文
+bypass_router:
+  enabled: false
+  # 路由决策模型，格式：provider/model-id，建议使用低成本快速模型
+  routing_model: "dashscope/qwen3.5-flash"
+  # 自然语言路由规则，将被注入到路由提示词中
+  routing_rules: |
+    - 代码生成、调试、架构设计任务 → dashscope/qwen3-coder-plus
+    - 创意写作、长文本 → moonshot/kimi-chat
+    - 其他通用任务 → dashscope/qwen3.5-plus
+  # 路由超时（毫秒），超时自动降级到场景路由
+  timeout_ms: 3000
+  # 消息数超过此阈值时，路由器才被允许建议压缩上下文
+  compress_context_threshold: 10
+  # 可选：自定义路由提示词（留空使用内置默认值）
+  # routing_prompt: ""
+  # 可选：自定义上下文压缩提示词（留空使用内置默认值）
+  # compress_prompt: ""
