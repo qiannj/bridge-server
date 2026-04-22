@@ -114,6 +114,7 @@ class DashScopeProvider(BaseProvider):
             json=payload
         ) as response:
             response.raise_for_status()
+            stream_state = {}
             
             async for line in response.aiter_lines():
                 if not line.strip():
@@ -128,7 +129,7 @@ class DashScopeProvider(BaseProvider):
                     
                     try:
                         chunk = json.loads(data)
-                        chunk = self._normalize_openai_compatible_stream_chunk(chunk, "dashscope")
+                        chunk = self._normalize_openai_compatible_stream_chunk(chunk, "dashscope", stream_state)
                         yield json.dumps(chunk, ensure_ascii=False)
                     
                     except json.JSONDecodeError:

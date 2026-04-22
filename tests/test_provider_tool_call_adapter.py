@@ -193,3 +193,42 @@ async def test_openai_provider_converts_tool_name_param_blocks_to_openai_tool_ca
     assert message["content"] == "我来帮你排查项目文档 current.md。按照你的要求，我需要先搜索它的位置。\n\n让我先搜索这个文件："
     assert message["tool_calls"][0]["function"]["name"] == "search_files"
     assert message["tool_calls"][0]["function"]["arguments"] == '{"path": ".", "pattern": "current.md"}'
+
+
+@pytest.mark.asyncio
+async def test_openai_provider_converts_split_stream_tagged_tool_call_to_tool_calls():
+    provider = OpenAIProvider({"id": "openai", "api_key": "***", "base_url": "https://example.com"})
+    stream_state = {}
+
+    first = provider._normalize_openai_compatible_stream_chunk({
+        "choices": [{
+            "index": 0,
+            "delta": {"content": "<minimax:tool_call>"},
+            "finish_reason": None,
+        }]
+    }, "openai", stream_state)
+
+    second = provider._normalize_openai_compatible_stream_chunk({
+        "choices": [{
+            "index": 0,
+            "delta": {"content": "\n<invoke name=\"exec\">\n<parameter name=\"command\">openclaw status</parameter>\n</invoke>"},
+            "finish_reason": None,
+        }]
+    }, "openai", stream_state)
+
+    third = provider._normalize_openai_compatible_stream_chunk({
+        "choices": [{
+            "index": 0,
+            "delta": {"content": "\n</minimax:tool_call>"},
+            "finish_reason": None,
+        }]
+    }, "openai", stream_state)
+
+    assert first["choices"][0]["delta"].get("content") is None
+    assert first["choices"][0]["delta"].get("tool_calls") is None
+    assert second["choices"][0]["delta"].get("content") is None
+    assert second["choices"][0]["delta"].get("tool_calls") is None
+    assert third["choices"][0]["finish_reason"] == "tool_calls"
+    assert third["choices"][0]["delta"].get("content") is None
+    assert third["choices"][0]["delta"]["tool_calls"][0]["function"]["name"] == "exec"
+    assert third["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"] == '{"command": "openclaw status"}'

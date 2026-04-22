@@ -67,6 +67,11 @@ _SIMPLE_XML_ARG_RE = re.compile(
     r"<([a-zA-Z0-9_:-]+)>\s*(.*?)\s*</\1>",
     re.DOTALL,
 )
+_STREAM_TOOL_CALL_START_MARKERS = (
+    "<minimax:tool_call",
+    "<tool_call",
+    "<tool_code",
+)
 
 
 class ProviderStatus(Enum):
@@ -449,6 +454,78 @@ class BaseProvider(ABC):
         cleaned = cleaned.strip()
         return cleaned or None, tool_calls
 
+    @staticmethod
+    def _find_stream_tool_call_start(content: str) -> Optional[int]:
+        lowered = content.lower()
+        positions = [lowered.find(marker) for marker in _STREAM_TOOL_CALL_START_MARKERS]
+        positions = [pos for pos in positions if pos >= 0]
+        if not positions:
+            return None
+        return min(positions)
+
+    def _normalize_openai_compatible_stream_delta(
+        self,
+        *,
+        delta: Dict[str, Any],
+        finish_reason: Any,
+        choice_index: int,
+        stream_state: Optional[Dict[str, Any]] = None,
+    ) -> Any:
+        if not isinstance(delta, dict) or delta.get("tool_calls"):
+            return finish_reason
+
+        content = delta.get("content")
+        if not isinstance(content, str) or stream_state is None:
+            cleaned_content, tool_calls = self._extract_tagged_tool_calls(content)
+            if tool_calls:
+                delta["content"] = cleaned_content
+                delta["tool_calls"] = tool_calls
+                if finish_reason in (None, "stop"):
+                    finish_reason = "tool_calls"
+            return finish_reason
+
+        buffers = stream_state.setdefault("tagged_tool_call_buffers", {})
+        pending = buffers.get(choice_index)
+
+        if pending is not None:
+            pending += content
+            cleaned_content, tool_calls = self._extract_tagged_tool_calls(pending)
+            if tool_calls:
+                buffers.pop(choice_index, None)
+                delta["content"] = cleaned_content
+                delta["tool_calls"] = tool_calls
+                if finish_reason in (None, "stop"):
+                    finish_reason = "tool_calls"
+            else:
+                buffers[choice_index] = pending
+                delta["content"] = None
+            return finish_reason
+
+        start = self._find_stream_tool_call_start(content)
+        if start is None:
+            cleaned_content, tool_calls = self._extract_tagged_tool_calls(content)
+            if tool_calls:
+                delta["content"] = cleaned_content
+                delta["tool_calls"] = tool_calls
+                if finish_reason in (None, "stop"):
+                    finish_reason = "tool_calls"
+            return finish_reason
+
+        prefix = content[:start] or None
+        candidate = content[start:]
+        cleaned_content, tool_calls = self._extract_tagged_tool_calls(candidate)
+        if tool_calls:
+            merged_content = "".join(part for part in (prefix, cleaned_content) if part)
+            delta["content"] = merged_content or None
+            delta["tool_calls"] = tool_calls
+            if finish_reason in (None, "stop"):
+                finish_reason = "tool_calls"
+            return finish_reason
+
+        buffers[choice_index] = candidate
+        delta["content"] = prefix
+        return finish_reason
+
     def _normalize_openai_compatible_response(self, result: Dict[str, Any], provider_name: str) -> Dict[str, Any]:
         normalized = dict(result or {})
         normalized["provider"] = provider_name
@@ -485,7 +562,12 @@ class BaseProvider(ABC):
 
         return normalized
 
-    def _normalize_openai_compatible_stream_chunk(self, chunk: Dict[str, Any], provider_name: str) -> Dict[str, Any]:
+    def _normalize_openai_compatible_stream_chunk(
+        self,
+        chunk: Dict[str, Any],
+        provider_name: str,
+        stream_state: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         normalized = dict(chunk or {})
         normalized["provider"] = provider_name
 
@@ -501,14 +583,12 @@ class BaseProvider(ABC):
                 continue
 
             before_summary = self._summarize_assistant_structure(delta, choice.get("finish_reason"))
-
-            if not delta.get("tool_calls"):
-                cleaned_content, tool_calls = self._extract_tagged_tool_calls(delta.get("content"))
-                if tool_calls:
-                    delta["content"] = cleaned_content
-                    delta["tool_calls"] = tool_calls
-                    if choice.get("finish_reason") in (None, "stop"):
-                        choice["finish_reason"] = "tool_calls"
+            choice["finish_reason"] = self._normalize_openai_compatible_stream_delta(
+                delta=delta,
+                finish_reason=choice.get("finish_reason"),
+                choice_index=index,
+                stream_state=stream_state,
+            )
 
             after_summary = self._summarize_assistant_structure(delta, choice.get("finish_reason"))
             if before_summary["structure_flags"] or before_summary["tool_call_count"] or after_summary["tool_call_count"]:

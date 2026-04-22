@@ -140,6 +140,7 @@ class OpenAIProvider(BaseProvider):
             json=payload
         ) as response:
             response.raise_for_status()
+            stream_state = {}
             
             async for line in response.aiter_lines():
                 if not line.strip():
@@ -154,7 +155,7 @@ class OpenAIProvider(BaseProvider):
                     
                     try:
                         chunk = json.loads(data)
-                        chunk = self._normalize_openai_compatible_stream_chunk(chunk, "openai")
+                        chunk = self._normalize_openai_compatible_stream_chunk(chunk, "openai", stream_state)
 
                         # 规范化 delta：确保 reasoning_content 字段存在（方便客户端处理）
                         for choice in chunk.get("choices", []):
