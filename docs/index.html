@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bridge Server — AI 接口统一网关</title>
+  <style>
+    :root {
+      --brand: #6366f1;
+      --brand-dark: #4338ca;
+      --brand-light: #e0e7ff;
+      --text: #1e293b;
+      --muted: #64748b;
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --border: #e2e8f0;
+      --code-bg: #0f172a;
+      --radius: 16px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+
+    /* ── NAV ── */
+    nav {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(255,255,255,0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 2rem; height: 60px;
+    }
+    .nav-logo { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+    .nav-logo-icon {
+      width: 36px; height: 36px; border-radius: 10px;
+      background: linear-gradient(135deg, #6366f1, #818cf8);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px; flex-shrink: 0;
+    }
+    .nav-logo-text { font-size: 1rem; font-weight: 700; color: var(--text); }
+    .nav-links { display: flex; gap: 1.5rem; list-style: none; }
+    .nav-links a { text-decoration: none; font-size: 0.875rem; color: var(--muted); transition: color .15s; }
+    .nav-links a:hover { color: var(--brand); }
+    .nav-cta {
+      background: var(--brand); color: white;
+      padding: 6px 16px; border-radius: 8px;
+      font-size: 0.875rem; font-weight: 600; text-decoration: none;
+      transition: background .15s;
+    }
+    .nav-cta:hover { background: var(--brand-dark); }
+
+    /* ── HERO ── */
+    .hero {
+      background: linear-gradient(135deg, #6366f1 0%, #818cf8 40%, #a5b4fc 100%);
+      padding: 5rem 2rem 4rem;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .hero::before {
+      content: '';
+      position: absolute; inset: 0;
+      background: radial-gradient(ellipse 80% 60% at 50% 110%, rgba(255,255,255,.15), transparent);
+    }
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: rgba(255,255,255,.2); border: 1px solid rgba(255,255,255,.3);
+      color: white; padding: 4px 14px; border-radius: 100px;
+      font-size: 0.8rem; font-weight: 600; margin-bottom: 1.5rem;
+    }
+    .hero h1 {
+      font-size: clamp(2.2rem, 5vw, 3.6rem);
+      font-weight: 800; color: white;
+      line-height: 1.15; margin-bottom: 1rem;
+    }
+    .hero h1 span { color: #fde68a; }
+    .hero p {
+      font-size: clamp(1rem, 2vw, 1.2rem);
+      color: rgba(255,255,255,.88);
+      max-width: 600px; margin: 0 auto 2.5rem;
+    }
+    .hero-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+    .btn-primary {
+      background: white; color: var(--brand-dark);
+      padding: 12px 28px; border-radius: 10px;
+      font-size: 0.95rem; font-weight: 700;
+      text-decoration: none; display: inline-flex; align-items: center; gap: 8px;
+      box-shadow: 0 4px 24px rgba(0,0,0,.15);
+      transition: transform .15s, box-shadow .15s;
+    }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(0,0,0,.2); }
+    .btn-secondary {
+      background: rgba(255,255,255,.15); color: white;
+      border: 1.5px solid rgba(255,255,255,.4);
+      padding: 12px 28px; border-radius: 10px;
+      font-size: 0.95rem; font-weight: 600;
+      text-decoration: none; display: inline-flex; align-items: center; gap: 8px;
+      transition: background .15s;
+    }
+    .btn-secondary:hover { background: rgba(255,255,255,.25); }
+
+    /* ── METRICS BAR ── */
+    .metrics-bar {
+      background: white;
+      border-bottom: 1px solid var(--border);
+      padding: 1.2rem 2rem;
+      display: flex; justify-content: center; gap: 3rem; flex-wrap: wrap;
+    }
+    .metric { text-align: center; }
+    .metric-num { font-size: 1.5rem; font-weight: 800; color: var(--brand); }
+    .metric-label { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+
+    /* ── SECTIONS ── */
+    section { padding: 5rem 2rem; max-width: 1100px; margin: 0 auto; }
+    .section-tag {
+      display: inline-block;
+      background: var(--brand-light); color: var(--brand-dark);
+      padding: 3px 12px; border-radius: 100px;
+      font-size: 0.75rem; font-weight: 700; margin-bottom: 1rem;
+      text-transform: uppercase; letter-spacing: .05em;
+    }
+    h2 {
+      font-size: clamp(1.6rem, 3vw, 2.2rem);
+      font-weight: 800; color: var(--text); margin-bottom: 0.75rem;
+    }
+    .section-sub { font-size: 1.05rem; color: var(--muted); max-width: 560px; margin-bottom: 3rem; }
+
+    /* ── PROBLEM ── */
+    .problem-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1.5rem;
+    }
+    .problem-card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1.8rem;
+    }
+    .problem-card .icon { font-size: 2rem; margin-bottom: 1rem; }
+    .problem-card h3 { font-size: 1rem; font-weight: 700; margin-bottom: 0.5rem; }
+    .problem-card p { font-size: 0.875rem; color: var(--muted); line-height: 1.65; }
+    .arrow-row {
+      display: flex; align-items: center; justify-content: center;
+      gap: 1rem; margin: 2.5rem 0; flex-wrap: wrap;
+    }
+    .arrow-chip {
+      background: var(--brand-light); color: var(--brand-dark);
+      padding: 8px 20px; border-radius: 100px;
+      font-size: 0.85rem; font-weight: 600;
+    }
+    .arrow { font-size: 1.5rem; color: var(--brand); }
+
+    /* ── FEATURES ── */
+    #features { background: white; max-width: 100%; padding: 5rem 2rem; }
+    #features .inner { max-width: 1100px; margin: 0 auto; }
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1.5rem;
+    }
+    .feature-card {
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1.8rem;
+      transition: box-shadow .2s, transform .2s;
+    }
+    .feature-card:hover { box-shadow: 0 8px 32px rgba(99,102,241,.12); transform: translateY(-3px); }
+    .feature-card .feat-icon {
+      width: 44px; height: 44px; border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.3rem; margin-bottom: 1rem;
+    }
+    .feat-purple { background: #ede9fe; }
+    .feat-blue   { background: #dbeafe; }
+    .feat-green  { background: #dcfce7; }
+    .feat-amber  { background: #fef3c7; }
+    .feat-rose   { background: #ffe4e6; }
+    .feat-cyan   { background: #cffafe; }
+    .feature-card h3 { font-size: 1rem; font-weight: 700; margin-bottom: 0.5rem; }
+    .feature-card p { font-size: 0.875rem; color: var(--muted); line-height: 1.65; }
+    .feat-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 1rem; }
+    .feat-tag {
+      background: white; border: 1px solid var(--border);
+      color: var(--muted); font-size: 0.7rem; padding: 2px 8px; border-radius: 100px;
+    }
+
+    /* ── ROUTING ── */
+    .routing-flow {
+      background: var(--code-bg);
+      border-radius: var(--radius);
+      padding: 2.5rem;
+      margin-top: 2.5rem;
+      font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+      font-size: 0.875rem;
+      line-height: 2;
+      overflow-x: auto;
+    }
+    .rf-title { color: #94a3b8; margin-bottom: 1rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: .1em; }
+    .rf-line { display: flex; align-items: baseline; gap: 1rem; }
+    .rf-num { color: #475569; min-width: 20px; }
+    .rf-badge {
+      display: inline-block;
+      padding: 1px 10px; border-radius: 6px;
+      font-size: 0.8rem; font-weight: 600;
+    }
+    .rb-direct  { background: #1e3a5f; color: #93c5fd; }
+    .rb-bypass  { background: #3b1f6b; color: #c4b5fd; }
+    .rb-plugin  { background: #1c3d32; color: #6ee7b7; }
+    .rb-smart   { background: #3d2a10; color: #fbbf24; }
+    .rb-default { background: #1e293b; color: #94a3b8; }
+    .rf-desc { color: #94a3b8; }
+    .rf-tag-new {
+      background: #14532d; color: #4ade80;
+      font-size: 0.65rem; padding: 1px 7px; border-radius: 4px;
+      vertical-align: middle; margin-left: 6px;
+    }
+    .rf-arrow { color: #475569; margin: 0 8px; }
+    .rf-fallback { color: #475569; font-size: 0.8rem; margin-left: 2rem; }
+
+    /* ── CODE BLOCK ── */
+    .code-area {
+      background: var(--code-bg);
+      border-radius: var(--radius); overflow: hidden;
+      margin-top: 1.5rem;
+    }
+    .code-header {
+      background: #1e293b;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 1.5rem;
+    }
+    .code-dots { display: flex; gap: 6px; }
+    .code-dots span {
+      width: 12px; height: 12px; border-radius: 50%;
+    }
+    .cd-red { background: #ff5f56; }
+    .cd-yellow { background: #ffbd2e; }
+    .cd-green { background: #27c93f; }
+    .code-lang { color: #94a3b8; font-size: 0.75rem; font-family: monospace; }
+    .code-body {
+      padding: 1.5rem;
+      font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+      font-size: 0.85rem; line-height: 1.8;
+      overflow-x: auto;
+    }
+    .c-gray   { color: #64748b; }
+    .c-green  { color: #4ade80; }
+    .c-yellow { color: #fde68a; }
+    .c-blue   { color: #93c5fd; }
+    .c-purple { color: #c4b5fd; }
+    .c-orange { color: #fb923c; }
+    .c-cyan   { color: #67e8f9; }
+    .c-white  { color: #f1f5f9; }
+
+    /* ── QUICKSTART TABS ── */
+    .tabs { display: flex; gap: 4px; margin-bottom: -1px; }
+    .tab {
+      padding: 8px 18px; border-radius: 8px 8px 0 0;
+      font-size: 0.8rem; font-weight: 600; cursor: pointer;
+      background: #1e293b; color: #64748b; border: 1px solid #334155; border-bottom: none;
+      user-select: none;
+    }
+    .tab.active { background: #0f172a; color: #e2e8f0; border-color: #475569; }
+
+    /* ── PROVIDERS ── */
+    .providers-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 1rem; margin-top: 2rem;
+    }
+    .provider-card {
+      background: white; border: 1px solid var(--border);
+      border-radius: 12px; padding: 1.2rem 1.5rem;
+      display: flex; align-items: center; gap: 12px;
+    }
+    .provider-card .picon {
+      width: 36px; height: 36px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.1rem; flex-shrink: 0; background: var(--bg);
+    }
+    .provider-card .pname { font-size: 0.875rem; font-weight: 600; }
+    .provider-card .pdesc { font-size: 0.75rem; color: var(--muted); }
+
+    /* ── ADMIN PANEL MOCKUP ── */
+    .panel-mockup {
+      background: #1e293b;
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: 0 24px 80px rgba(0,0,0,.3);
+      margin-top: 2.5rem;
+    }
+    .panel-topbar {
+      background: #0f172a;
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 16px; border-bottom: 1px solid #334155;
+    }
+    .panel-dot { width: 10px; height: 10px; border-radius: 50%; }
+    .pd-r { background: #ff5f56; }
+    .pd-y { background: #ffbd2e; }
+    .pd-g { background: #27c93f; }
+    .panel-url { color: #475569; font-size: 0.75rem; margin-left: 8px; font-family: monospace; }
+    .panel-body { display: flex; height: 340px; }
+    .panel-sidebar {
+      width: 140px; flex-shrink: 0;
+      background: #1e293b;
+      border-right: 1px solid #334155;
+      padding: 1rem 0;
+    }
+    .ps-item {
+      padding: 7px 16px; font-size: 0.78rem; cursor: default;
+      display: flex; align-items: center; gap: 8px; color: #64748b;
+    }
+    .ps-item.active {
+      background: rgba(99,102,241,.15);
+      color: #818cf8; font-weight: 600;
+      border-right: 2px solid #6366f1;
+    }
+    .panel-content { flex: 1; padding: 1.5rem; overflow: hidden; }
+    .pc-title { color: #e2e8f0; font-size: 0.875rem; font-weight: 700; margin-bottom: 1rem; }
+    .pc-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 1rem; }
+    .pc-card {
+      background: #0f172a; border: 1px solid #334155;
+      border-radius: 10px; padding: 12px;
+    }
+    .pc-card-num { font-size: 1.3rem; font-weight: 800; color: #818cf8; }
+    .pc-card-lbl { font-size: 0.7rem; color: #64748b; margin-top: 2px; }
+    .pc-bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .pc-bar-lbl { font-size: 0.7rem; color: #94a3b8; width: 60px; flex-shrink: 0; }
+    .pc-bar-bg { flex: 1; height: 6px; background: #1e293b; border-radius: 3px; overflow: hidden; }
+    .pc-bar-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, #6366f1, #818cf8); }
+    .pc-bar-val { font-size: 0.7rem; color: #475569; width: 36px; text-align: right; }
+
+    /* ── CALLOUT ── */
+    .callout {
+      background: linear-gradient(135deg, #6366f1 0%, #4338ca 100%);
+      border-radius: var(--radius);
+      padding: 3.5rem 3rem;
+      text-align: center; color: white;
+      margin: 3rem auto; max-width: 800px;
+    }
+    .callout h2 { color: white; font-size: 1.8rem; margin-bottom: 0.75rem; }
+    .callout p { color: rgba(255,255,255,.8); margin-bottom: 2rem; font-size: 1rem; }
+    .callout .cta-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+
+    /* ── FOOTER ── */
+    footer {
+      background: var(--code-bg);
+      color: #475569; font-size: 0.8rem;
+      padding: 2rem; text-align: center;
+      border-top: 1px solid #1e293b;
+    }
+    footer a { color: #6366f1; text-decoration: none; }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 640px) {
+      .metrics-bar { gap: 1.5rem; }
+      .panel-body { height: auto; flex-direction: column; }
+      .panel-sidebar { width: 100%; border-right: none; border-bottom: 1px solid #334155; display: flex; flex-wrap: wrap; padding: 0.5rem; }
+      .ps-item { padding: 6px 10px; }
+      .nav-links { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══ NAV ═══ -->
+<nav>
+  <a href="#" class="nav-logo">
+    <div class="nav-logo-icon">🌉</div>
+    <span class="nav-logo-text">Bridge Server</span>
+  </a>
+  <ul class="nav-links">
+    <li><a href="#features">功能</a></li>
+    <li><a href="#routing">路由</a></li>
+    <li><a href="#quickstart">快速开始</a></li>
+    <li><a href="#providers">支持平台</a></li>
+  </ul>
+  <a href="https://github.com/qiannj/bridge-server" class="nav-cta">GitHub →</a>
+</nav>
+
+<!-- ═══ HERO ═══ -->
+<div class="hero">
+  <div class="hero-badge">✨ v2.2 · OpenAI Compatible</div>
+  <h1>一个网关，<span>接入所有 AI</span></h1>
+  <p>Bridge Server 将 DashScope、MiniMax、Moonshot、OpenAI 等多个大模型平台统一为单一 OpenAI 兼容接口，让你的 AI Agent 无缝切换模型，智能路由、成本可控。</p>
+  <div class="hero-actions">
+    <a href="#quickstart" class="btn-primary">🚀 5 分钟上手</a>
+    <a href="https://github.com/qiannj/bridge-server" class="btn-secondary">⭐ GitHub</a>
+  </div>
+</div>
+
+<!-- ═══ METRICS BAR ═══ -->
+<div class="metrics-bar">
+  <div class="metric"><div class="metric-num">OpenAI</div><div class="metric-label">100% 兼容接口</div></div>
+  <div class="metric"><div class="metric-num">4+</div><div class="metric-label">主流 AI 平台</div></div>
+  <div class="metric"><div class="metric-num">5 层</div><div class="metric-label">智能路由优先级</div></div>
+  <div class="metric"><div class="metric-num">零改动</div><div class="metric-label">客户端迁移成本</div></div>
+  <div class="metric"><div class="metric-num">实时</div><div class="metric-label">流式 + 空回合兜底</div></div>
+</div>
+
+<!-- ═══ PROBLEM ═══ -->
+<section id="problem">
+  <div class="section-tag">为什么需要它</div>
+  <h2>直连多个 AI 平台的三大痛点</h2>
+  <p class="section-sub">每个平台都有自己的 SDK、认证方式和接口格式，维护成本随平台数量指数增长。</p>
+  <div class="problem-grid">
+    <div class="problem-card">
+      <div class="icon">🔌</div>
+      <h3>接入复杂</h3>
+      <p>DashScope、MiniMax、Moonshot 各自的 API 格式不一致，切换平台需要大量改动客户端代码，新增 Provider 成本极高。</p>
+    </div>
+    <div class="problem-card">
+      <div class="icon">💸</div>
+      <h3>成本不可控</h3>
+      <p>不知道每次请求实际落到哪个模型，简单问候误用昂贵推理模型，缺少统一的用量视图和预算控制。</p>
+    </div>
+    <div class="problem-card">
+      <div class="icon">🔇</div>
+      <h3>上游异常难兜底</h3>
+      <p>上游偶发的空回合（reasoning-only stop）、流式中断会直接透传给 Agent，导致「Agent couldn't generate a response」等难排查问题。</p>
+    </div>
+  </div>
+  <div class="arrow-row">
+    <div class="arrow-chip">Bridge Server</div>
+    <span class="arrow">→</span>
+    <div class="arrow-chip">统一接口 · 智能路由 · 异常兜底 · 成本可视</div>
+  </div>
+</section>
+
+<!-- ═══ FEATURES ═══ -->
+<div id="features">
+<div class="inner">
+  <div class="section-tag">核心功能</div>
+  <h2>不只是转发，更是智能适配层</h2>
+  <p class="section-sub">从协议归一到 LLM 智能路由，Bridge Server 把零散的 AI 平台管理变成统一可控的工程能力。</p>
+  <div class="features-grid">
+
+    <div class="feature-card">
+      <div class="feat-icon feat-purple">🔀</div>
+      <h3>五层智能路由</h3>
+      <p>按优先级依次：客户端直接指定 → 旁路 LLM 路由器 → 代码插件路由器 → 场景正则路由 → ProviderManager 兜底，每层失败自动降级，路由决策全程可观测。</p>
+      <div class="feat-tags">
+        <span class="feat-tag">SmartRouter</span>
+        <span class="feat-tag">BypassRouter</span>
+        <span class="feat-tag">插件路由器</span>
+      </div>
+    </div>
+
+    <div class="feature-card">
+      <div class="feat-icon feat-blue">🧠</div>
+      <h3>旁路模型路由器</h3>
+      <p>指定一个轻量 LLM 作为路由大脑，用自然语言描述路由规则，让 AI 决定每次请求应该交给哪个模型处理。超过阈值时还可自动压缩历史上下文。</p>
+      <div class="feat-tags">
+        <span class="feat-tag">LLM 路由决策</span>
+        <span class="feat-tag">上下文压缩</span>
+        <span class="feat-tag">超时降级</span>
+      </div>
+    </div>
+
+    <div class="feature-card">
+      <div class="feat-icon feat-green">🛡️</div>
+      <h3>空回合三层兜底</h3>
+      <p>自动检测 reasoning-only stop、空 delta 等异常空回合，先尝试单次 non-stream 重试（附加强制回复提示词），仍失败则返回最小可见文本，不透传空响应给 Agent。</p>
+      <div class="feat-tags">
+        <span class="feat-tag">工具 follow-up 感知</span>
+        <span class="feat-tag">自动重试</span>
+        <span class="feat-tag">结构化日志</span>
+      </div>
+    </div>
+
+    <div class="feature-card">
+      <div class="feat-icon feat-amber">⚡</div>
+      <h3>流式异常自动降级</h3>
+      <p>流式请求在内容发送前失败时，自动降级为非流式调用并转换为 SSE 格式输出，客户端完全无感知。流式工具调用结构化解析，兼容 XML 格式工具调用。</p>
+      <div class="feat-tags">
+        <span class="feat-tag">stream→非流式 fallback</span>
+        <span class="feat-tag">tool_call 转换</span>
+      </div>
+    </div>
+
+    <div class="feature-card">
+      <div class="feat-icon feat-rose">📊</div>
+      <h3>可视化管理面板</h3>
+      <p>内置 Web 管理面板，支持 Provider 管理、路由配置、用量统计、降本看板、日志查看、系统更新、外部 API Key 管理等全部运营功能。单文件 Alpine.js 实现，无构建步骤。</p>
+      <div class="feat-tags">
+        <span class="feat-tag">实时监控</span>
+        <span class="feat-tag">成本分析</span>
+        <span class="feat-tag">热重载配置</span>
+      </div>
+    </div>
+
+    <div class="feature-card">
+      <div class="feat-icon feat-cyan">🧪</div>
+      <h3>模型能力基准测试</h3>
+      <p>覆盖代码编程、数学推理、文学创作、语言翻译、日常对话五个维度，添加模型后一键发起测试，结果展示星级评分，帮助快速选出最适合业务的模型。</p>
+      <div class="feat-tags">
+        <span class="feat-tag">5 维度评分</span>
+        <span class="feat-tag">Token 用量预估</span>
+        <span class="feat-tag">Setup Wizard 集成</span>
+      </div>
+    </div>
+
+  </div>
+</div>
+</div>
+
+<!-- ═══ ROUTING ═══ -->
+<section id="routing">
+  <div class="section-tag">路由架构</div>
+  <h2>五层优先级路由链</h2>
+  <p class="section-sub">每一层独立决策，失败时自动传递给下一层，保证每个请求都能得到最合适的响应。</p>
+
+  <div class="routing-flow">
+    <div class="rf-title">▸ 路由决策流程 — /v1/chat/completions</div>
+
+    <div class="rf-line">
+      <span class="rf-num">①</span>
+      <span class="rf-badge rb-direct">直接指定</span>
+      <span class="rf-desc"> model="dashscope/qwen3-coder-plus" — confidence 1.0，直达，跳过所有路由</span>
+    </div>
+    <div class="rf-fallback">↓ model 为空 / "smart"</div>
+
+    <div class="rf-line">
+      <span class="rf-num">②</span>
+      <span class="rf-badge rb-bypass">旁路路由器</span>
+      <span class="rf-desc"> LLM 智能决策 + 上下文压缩 <span class="rf-tag-new">NEW</span></span>
+    </div>
+    <div class="rf-fallback">↓ 未启用 / 超时 / 决策失败</div>
+
+    <div class="rf-line">
+      <span class="rf-num">③</span>
+      <span class="rf-badge rb-plugin">插件路由器</span>
+      <span class="rf-desc"> 用户 Python 插件，300ms 沙箱执行 <span class="rf-tag-new">NEW</span></span>
+    </div>
+    <div class="rf-fallback">↓ 无激活插件 / 执行失败</div>
+
+    <div class="rf-line">
+      <span class="rf-num">④</span>
+      <span class="rf-badge rb-smart">场景路由</span>
+      <span class="rf-desc"> 正则匹配 coding/writing/translation 等场景，支持优先级和排除规则</span>
+    </div>
+    <div class="rf-fallback">↓ 无匹配场景</div>
+
+    <div class="rf-line">
+      <span class="rf-num">⑤</span>
+      <span class="rf-badge rb-default">ProviderManager</span>
+      <span class="rf-desc"> 按 fallback / round_robin / cost_optimized / lowest_latency 策略兜底</span>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ ADMIN PANEL MOCKUP ═══ -->
+<section style="padding-top: 0;">
+  <div class="section-tag">管理面板</div>
+  <h2>开箱即用的可视化控制台</h2>
+  <p class="section-sub">内置 Web 管理面板，无需额外部署，访问 <code style="background:var(--brand-light);color:var(--brand-dark);padding:2px 8px;border-radius:6px;">http://localhost:19377</code> 即可使用。</p>
+
+  <div class="panel-mockup">
+    <div class="panel-topbar">
+      <div class="panel-dot pd-r"></div>
+      <div class="panel-dot pd-y"></div>
+      <div class="panel-dot pd-g"></div>
+      <span class="panel-url">http://localhost:19377 — Bridge Server 管理面板</span>
+    </div>
+    <div class="panel-body">
+      <div class="panel-sidebar">
+        <div class="ps-item active">📊 仪表盘</div>
+        <div class="ps-item">🔌 Providers</div>
+        <div class="ps-item">🔀 路由配置</div>
+        <div class="ps-item">🧠 旁路路由器</div>
+        <div class="ps-item">📈 用量统计</div>
+        <div class="ps-item">💰 降本看板</div>
+        <div class="ps-item">📋 日志</div>
+        <div class="ps-item">⚙️ 系统</div>
+      </div>
+      <div class="panel-content">
+        <div class="pc-title">今日概览</div>
+        <div class="pc-cards">
+          <div class="pc-card">
+            <div class="pc-card-num">1,247</div>
+            <div class="pc-card-lbl">今日请求</div>
+          </div>
+          <div class="pc-card">
+            <div class="pc-card-num" style="color:#34d399;">¥3.82</div>
+            <div class="pc-card-lbl">节省费用</div>
+          </div>
+          <div class="pc-card">
+            <div class="pc-card-num" style="color:#f59e0b;">99.8%</div>
+            <div class="pc-card-lbl">成功率</div>
+          </div>
+        </div>
+        <div style="margin-top:1.2rem;">
+          <div style="font-size:0.72rem;color:#475569;margin-bottom:8px;">路由分布</div>
+          <div class="pc-bar-row">
+            <span class="pc-bar-lbl">场景路由</span>
+            <div class="pc-bar-bg"><div class="pc-bar-fill" style="width:68%;"></div></div>
+            <span class="pc-bar-val">68%</span>
+          </div>
+          <div class="pc-bar-row">
+            <span class="pc-bar-lbl">旁路路由</span>
+            <div class="pc-bar-bg"><div class="pc-bar-fill" style="width:21%;background:linear-gradient(90deg,#7c3aed,#a78bfa);"></div></div>
+            <span class="pc-bar-val">21%</span>
+          </div>
+          <div class="pc-bar-row">
+            <span class="pc-bar-lbl">直接指定</span>
+            <div class="pc-bar-bg"><div class="pc-bar-fill" style="width:11%;background:linear-gradient(90deg,#0891b2,#22d3ee);"></div></div>
+            <span class="pc-bar-val">11%</span>
+          </div>
+          <div style="margin-top:1.2rem;padding-top:1rem;border-top:1px solid #334155;display:flex;gap:8px;flex-wrap:wrap;">
+            <div style="background:#14532d;color:#4ade80;font-size:0.7rem;padding:3px 10px;border-radius:6px;">● dashscope 正常</div>
+            <div style="background:#14532d;color:#4ade80;font-size:0.7rem;padding:3px 10px;border-radius:6px;">● moonshot 正常</div>
+            <div style="background:#14532d;color:#4ade80;font-size:0.7rem;padding:3px 10px;border-radius:6px;">● nvidia 正常</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ QUICKSTART ═══ -->
+<section id="quickstart" style="background:white;max-width:100%;padding:5rem 2rem;">
+<div style="max-width:1100px;margin:0 auto;">
+  <div class="section-tag">快速开始</div>
+  <h2>5 分钟完成部署</h2>
+  <p class="section-sub">选择最适合你的安装方式，安装后访问 <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;">http://localhost:19377</code> 进入管理面板。</p>
+
+  <div class="tabs">
+    <div class="tab active">pip 直接运行</div>
+    <div class="tab">Setup Wizard</div>
+    <div class="tab">Docker</div>
+  </div>
+
+  <div class="code-area">
+    <div class="code-header">
+      <div class="code-dots">
+        <span class="cd-red"></span><span class="cd-yellow"></span><span class="cd-green"></span>
+      </div>
+      <span class="code-lang">bash</span>
+    </div>
+    <div class="code-body">
+      <div><span class="c-gray"># 1. 安装</span></div>
+      <div><span class="c-green">pip</span> <span class="c-white">install bridge-server</span></div>
+      <div>&nbsp;</div>
+      <div><span class="c-gray"># 2. 设置 API Key（至少一个 Provider）</span></div>
+      <div><span class="c-cyan">export</span> <span class="c-yellow">DASHSCOPE_API_KEY</span><span class="c-white">=sk-xxx</span></div>
+      <div>&nbsp;</div>
+      <div><span class="c-gray"># 3. 启动</span></div>
+      <div><span class="c-green">python</span> <span class="c-white">-m uvicorn bridge_server.runtime:app</span> <span class="c-purple">--app-dir</span> <span class="c-white">src</span> <span class="c-purple">--port</span> <span class="c-white">19377</span></div>
+      <div>&nbsp;</div>
+      <div><span class="c-gray"># 4. 发起第一个请求</span></div>
+      <div><span class="c-green">curl</span> <span class="c-white">-X POST http://127.0.0.1:19377/v1/chat/completions</span> <span class="c-orange">\</span></div>
+      <div><span class="c-white">  -H </span><span class="c-yellow">"Authorization: Bearer &lt;your-token&gt;"</span> <span class="c-orange">\</span></div>
+      <div><span class="c-white">  -H </span><span class="c-yellow">"Content-Type: application/json"</span> <span class="c-orange">\</span></div>
+      <div><span class="c-white">  -d </span><span class="c-yellow">'{"model":"smart","messages":[{"role":"user","content":"你好"}]}'</span></div>
+    </div>
+  </div>
+
+  <div style="margin-top:1.5rem;padding:1rem 1.5rem;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;font-size:0.875rem;color:#166534;">
+    💡 首次启动会自动生成 Admin Token 并打印到控制台，同时自动打开管理面板（<code>http://localhost:19377</code>）。
+  </div>
+</div>
+</section>
+
+<!-- ═══ PROVIDERS ═══ -->
+<section id="providers">
+  <div class="section-tag">支持平台</div>
+  <h2>主流 AI 平台开箱即用</h2>
+  <p class="section-sub">内置适配器已处理各平台的认证、格式差异和工具调用转换，新增平台只需填写 Base URL 和 API Key。</p>
+  <div class="providers-grid">
+    <div class="provider-card">
+      <div class="picon">🟠</div>
+      <div><div class="pname">阿里云百炼</div><div class="pdesc">Qwen 系列全线</div></div>
+    </div>
+    <div class="provider-card">
+      <div class="picon">🌙</div>
+      <div><div class="pname">Moonshot (Kimi)</div><div class="pdesc">长文本 / 创意写作</div></div>
+    </div>
+    <div class="provider-card">
+      <div class="picon">🤖</div>
+      <div><div class="pname">MiniMax</div><div class="pdesc">通用 / 工具调用</div></div>
+    </div>
+    <div class="provider-card">
+      <div class="picon">🟢</div>
+      <div><div class="pname">OpenAI</div><div class="pdesc">GPT 系列</div></div>
+    </div>
+    <div class="provider-card">
+      <div class="picon">⚡</div>
+      <div><div class="pname">NVIDIA NIM</div><div class="pdesc">加速推理端点</div></div>
+    </div>
+    <div class="provider-card">
+      <div class="picon">➕</div>
+      <div><div class="pname">自定义 Provider</div><div class="pdesc">任意 OpenAI 兼容接口</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ CALLOUT ═══ -->
+<div style="padding:0 2rem;">
+<div class="callout">
+  <h2>让你的 AI Agent 不再受平台束缚</h2>
+  <p>一行 Base URL 替换，即可让 Claude、OpenClaw、Cursor 等任意 OpenAI 兼容客户端<br>接入所有已配置的模型，并获得智能路由、成本优化和稳定兜底。</p>
+  <div class="cta-row">
+    <a href="https://github.com/qiannj/bridge-server" class="btn-primary">查看源码 →</a>
+    <a href="#quickstart" class="btn-secondary">立即体验</a>
+  </div>
+</div>
+</div>
+
+<!-- ═══ FOOTER ═══ -->
+<footer>
+  <p>Bridge Server · AI 接口统一网关 · AGPL-3.0 License</p>
+  <p style="margin-top:6px;">
+    <a href="https://github.com/qiannj/bridge-server">GitHub</a> ·
+    <a href="https://github.com/qiannj/bridge-server/blob/main/INSTALL.md">安装文档</a> ·
+    <a href="https://github.com/qiannj/bridge-server/blob/main/USAGE.md">使用指南</a> ·
+    <a href="https://github.com/qiannj/bridge-server/blob/main/CHANGELOG.md">更新日志</a>
+  </p>
+</footer>
+
+</body>
+</html>
