@@ -17,8 +17,11 @@ import json
 import secrets
 import logging
 import httpx
+import math
+import re as _re
+import time
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime
 
 from config import get_default_port
@@ -33,6 +36,213 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+
+
+# ── Benchmark 常量 ─────────────────────────────────────────────────────────────
+
+_BM_QUESTIONS_PER_DIM = 3
+_BM_DIMS = 5
+_BM_TOKENS_PER_CALL = 750
+_BM_SECS_PER_CALL = 6
+
+_BM_QUESTIONS: Dict[str, List[Dict]] = {
+    "coding": [
+        {"id": "code_1", "prompt": "用Python实现一个二分查找函数，要求：函数签名为 binary_search(arr, target)，包含详细注释，并给出时间复杂度。",
+         "check": lambda r: bool(_re.search(r"def binary_search", r) and ("O(" in r or "时间复杂度" in r))},
+        {"id": "code_2", "prompt": "写一段JavaScript代码，使用Promise实现一个带超时控制的fetch请求（超时3秒自动拒绝），并加注释。",
+         "check": lambda r: bool(_re.search(r"Promise|fetch|timeout|setTimeout", r, _re.I))},
+        {"id": "code_3", "prompt": "请找出以下Python代码中的bug并修复：\n```python\ndef find_max(lst):\n    max_val = lst[0]\n    for i in range(len(lst)):\n        if lst[i] > max_val:\n            max_val = lst[i+1]\n    return max_val\n```",
+         "check": lambda r: bool(_re.search(r"lst\[i\]|索引越界|index|bug|修复|错误", r, _re.I))},
+    ],
+    "math": [
+        {"id": "math_1", "prompt": "一列火车从A城出发，速度60km/h，同时另一列火车从B城出发，速度90km/h，两城相距600km，两车相向而行，请问几小时后相遇？给出完整解题过程。",
+         "check": lambda r: bool(_re.search(r"4\s*小时|4h|4\s*hour", r, _re.I) or "4" in r)},
+        {"id": "math_2", "prompt": "已知等差数列首项a₁=2，公差d=3，求第15项和前15项之和，请给出推导步骤。",
+         "check": lambda r: bool(_re.search(r"44", r) and _re.search(r"345", r))},
+        {"id": "math_3", "prompt": "用数学归纳法证明：对所有正整数n，1+2+3+...+n = n(n+1)/2",
+         "check": lambda r: bool(_re.search(r"归纳|induction|k\+1|假设|成立", r, _re.I))},
+    ],
+    "writing": [
+        {"id": "write_1", "prompt": "以「第一场雪」为题，写一段200字左右的散文，要求意境优美，有具体的场景描写。",
+         "check": lambda r: len(r) >= 100},
+        {"id": "write_2", "prompt": "帮我写一封给领导申请居家办公的邮件，原因是家中有老人生病需要照料，语气正式但不失人情味，不超过150字。",
+         "check": lambda r: bool(_re.search(r"申请|敬请|居家|审批|办公|领导|尊敬", r))},
+        {"id": "write_3", "prompt": "为一款主打「极简主义」风格的蓝牙耳机写一段产品介绍文案（80字以内），突出设计感和音质。",
+         "check": lambda r: 20 <= len(r) <= 300},
+    ],
+    "translation": [
+        {"id": "trans_1", "prompt": '将以下古文翻译成现代英文：\n"知之者不如好之者，好之者不如乐之者。"（出自《论语》）\n请同时给出字面意思和引申义。',
+         "check": lambda r: bool(_re.search(r"know|learn|enjoy|love|delight|pleasure", r, _re.I))},
+        {"id": "trans_2", "prompt": '将以下英文段落翻译成流畅的中文：\n"Artificial intelligence is transforming every industry, from healthcare to finance, creating both unprecedented opportunities and significant challenges for society."',
+         "check": lambda r: bool(_re.search(r"人工智能|医疗|金融|机遇|挑战", r))},
+        {"id": "trans_3", "prompt": "请将以下句子分别翻译成日语和法语：\n「春天来了，万物复苏。」",
+         "check": lambda r: bool(_re.search(r"春|printemps|春が|haru", r, _re.I))},
+    ],
+    "chat": [
+        {"id": "chat_1", "prompt": "我最近工作压力很大，经常失眠，有什么实用的放松建议？",
+         "check": lambda r: len(r) >= 80 and bool(_re.search(r"放松|呼吸|运动|睡眠|休息|建议", r))},
+        {"id": "chat_2", "prompt": "如果你是一种天气，你会是什么天气？为什么？（请给出有趣且有深度的回答）",
+         "check": lambda r: len(r) >= 50},
+        {"id": "chat_3", "prompt": "我朋友说「人生苦短，及时行乐」，我觉得这句话有点问题，你怎么看？",
+         "check": lambda r: bool(_re.search(r"但|然而|不过|另一方面|平衡|责任|意义|价值", r))},
+    ],
+}
+
+_BM_DIM_NAMES = {
+    "coding":      "💻 代码编程",
+    "math":        "🔢 数学推理",
+    "writing":     "✍️  文学创作",
+    "translation": "🌐 语言翻译",
+    "chat":        "💬 日常对话",
+}
+
+
+def _bm_call_model(base_url: str, api_key: str, model_id: str,
+                   prompt: str, timeout: int = 60) -> Tuple[str, float, str]:
+    """Synchronous model call for benchmark. Returns (content, latency_sec, error)."""
+    url = base_url.rstrip("/")
+    if not url.endswith("/chat/completions"):
+        url += "/chat/completions"
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    payload = {"model": model_id, "messages": [{"role": "user", "content": prompt}],
+               "max_tokens": 1000, "temperature": 0.7}
+    t0 = time.perf_counter()
+    try:
+        resp = httpx.post(url, json=payload, headers=headers, timeout=timeout, verify=False)
+        latency = time.perf_counter() - t0
+        resp.raise_for_status()
+        data = resp.json()
+        msg = data["choices"][0]["message"]
+        content = msg.get("content") or msg.get("reasoning_content") or ""
+        return content.strip(), latency, ""
+    except httpx.TimeoutException:
+        return "", time.perf_counter() - t0, f"超时（>{timeout}s）"
+    except Exception as e:
+        return "", time.perf_counter() - t0, str(e)[:120]
+
+
+def _bm_score(content: str, latency: float, check_fn, error: str) -> Dict[str, Any]:
+    if error:
+        return {"score": 0, "quality": False, "latency": latency, "error": error}
+    quality = bool(check_fn(content))
+    q_score = 40 if quality else 0
+    length = len(content)
+    l_score = min(30, int(length / 500 * 30)) if length >= 20 else 0
+    speed = max(0, 30 - int((latency - 5) / 85 * 30)) if latency > 5 else 30
+    return {"score": q_score + l_score + speed, "quality": quality,
+            "latency": round(latency, 1), "error": ""}
+
+
+def _bm_stars(score: int) -> str:
+    s = round(score / 20)
+    return "★" * s + "☆" * (5 - s)
+
+
+def run_benchmark_for_wizard(
+    provider_name: str,
+    base_url: str,
+    api_key: str,
+    model_ids: List[str],
+    colors: Any,
+    config_dir: Path,
+) -> None:
+    """Run benchmark synchronously and print results table. Called from setup wizard."""
+    dims = list(_BM_QUESTIONS.keys())
+    total = len(model_ids) * len(dims) * _BM_QUESTIONS_PER_DIM
+    done = 0
+    results: Dict[str, Dict] = {}
+
+    for model_id in model_ids:
+        key = f"{provider_name}/{model_id}"
+        results[key] = {}
+        for dim in dims:
+            questions = _BM_QUESTIONS[dim][:_BM_QUESTIONS_PER_DIM]
+            dim_scores = []
+            for q in questions:
+                done += 1
+                pct = int(done / total * 100)
+                bar = "█" * (pct // 5) + "░" * (20 - pct // 5)
+                print(f"\r  [{bar}] {pct:3d}%  {model_id}  {_BM_DIM_NAMES[dim]}",
+                      end="", flush=True)
+                content, latency, error = _bm_call_model(base_url, api_key, model_id, q["prompt"])
+                dim_scores.append(_bm_score(content, latency, q["check"], error))
+            avg_score = int(sum(r["score"] for r in dim_scores) / len(dim_scores)) if dim_scores else 0
+            avg_lat = round(sum(r["latency"] for r in dim_scores) / len(dim_scores), 1) if dim_scores else 0.0
+            results[key][dim] = {"score": avg_score, "stars": _bm_stars(avg_score), "avg_latency": avg_lat}
+    print()  # newline after progress bar
+
+    # ── 打印能力矩阵 ──────────────────────────────────────────────────────────
+    col_w = 14
+    model_col = max(24, max(len(k) for k in results) + 2)
+    dim_labels = [_BM_DIM_NAMES[d] for d in dims]
+    header = f"{'模型':<{model_col}}" + "".join(f"{l:^{col_w}}" for l in dim_labels) + f"{'综合':^8}"
+    sep = "─" * len(header)
+    print(f"\n{colors.BOLD}{colors.CYAN}{'='*len(sep)}{colors.ENDC}")
+    print(f"{colors.BOLD}{colors.CYAN}  📊 模型能力矩阵{colors.ENDC}")
+    print(f"{colors.CYAN}{'='*len(sep)}{colors.ENDC}\n")
+    print(f"{colors.BOLD}{header}{colors.ENDC}")
+    print(sep)
+
+    for key, dim_results in sorted(results.items(),
+                                   key=lambda x: -sum(v["score"] for v in x[1].values())):
+        scores = [dim_results.get(d, {}).get("score", 0) for d in dims]
+        overall = int(sum(scores) / len(scores)) if scores else 0
+        row = f"{key:<{model_col}}"
+        for d in dims:
+            row += f"{dim_results.get(d,{}).get('stars','─────'):^{col_w}}"
+        color = colors.GREEN if overall >= 70 else (colors.YELLOW if overall >= 50 else colors.RED)
+        row += f"{color}{overall:^8}{colors.ENDC}"
+        print(row)
+    print(sep)
+
+    # ── 保存结果 ─────────────────────────────────────────────────────────────
+    import yaml as _yaml
+    out_file = config_dir / "benchmark_results.yaml"
+    existing: dict = {}
+    if out_file.exists():
+        with open(out_file, encoding="utf-8") as f:
+            existing = _yaml.safe_load(f) or {}
+    existing.setdefault("results", {}).update(results)
+    existing["generated_at"] = datetime.now().isoformat()
+    existing["dimensions"] = dims
+    with open(out_file, "w", encoding="utf-8") as f:
+        _yaml.dump(existing, f, allow_unicode=True, default_flow_style=False)
+    print(f"\n{colors.GREEN}✅ 结果已保存：{out_file}{colors.ENDC}")
+
+
+def _offer_benchmark_after_add(
+    provider_name: str,
+    base_url: str,
+    api_key: str,
+    model_ids: List[str],
+    colors: Any,
+    config_dir: Path,
+) -> None:
+    """Ask user if they want to run benchmark; run synchronously if yes."""
+    total_calls = len(model_ids) * _BM_DIMS * _BM_QUESTIONS_PER_DIM
+    est_tokens = total_calls * _BM_TOKENS_PER_CALL
+    est_min = math.ceil(total_calls * _BM_SECS_PER_CALL / 60)
+
+    print(f"\n{colors.CYAN}{'─'*60}{colors.ENDC}")
+    print(f"{colors.BOLD}💡 是否现在进行模型能力摸底测试？{colors.ENDC}")
+    print(f"   本测试覆盖 5 个能力维度（代码、数学、写作、翻译、对话），")
+    print(f"   每个维度 {_BM_QUESTIONS_PER_DIM} 道题，每题约 500–1000 tokens。")
+    print(f"\n   • 待测模型：{', '.join(model_ids)}")
+    print(f"   • API 调用：{total_calls} 次")
+    print(f"   • Token 消耗：约 {est_tokens:,} tokens（费用取决于各平台定价）")
+    print(f"   • 预计耗时：约 {est_min} 分钟")
+    print(f"\n   {colors.YELLOW}⚠️  将消耗实际 API 配额{colors.ENDC}")
+    confirm = input("\n是否开始测试？[y/N]: ").strip().lower()
+    if confirm != "y":
+        print(f"{colors.YELLOW}已跳过，可随时在管理面板或运行 cli/model-benchmark.py 进行测试{colors.ENDC}")
+        return
+
+    print(f"\n{colors.BOLD}开始测试...（这可能需要几分钟）{colors.ENDC}\n")
+    t0 = time.perf_counter()
+    run_benchmark_for_wizard(provider_name, base_url, api_key, model_ids, colors, config_dir)
+    elapsed = time.perf_counter() - t0
+    print(f"\n{colors.GREEN}✅ 测试完成，耗时 {elapsed:.1f}s{colors.ENDC}")
+    print(f"{colors.CYAN}{'─'*60}{colors.ENDC}\n")
 logger = logging.getLogger(__name__)
 
 
@@ -410,6 +620,13 @@ class SetupWizard:
 
             self.config['providers'].append(provider_config)
             print(f"{Colors.GREEN}✅ {provider.name} 配置成功并已保存！{Colors.ENDC}")
+            # 邀约进行能力测试
+            _bm_key = api_key if auth_type != "oauth" else (self._fetch_oauth_token(oauth_cfg) or "")
+            model_ids = [m.get('id', '') if isinstance(m, dict) else str(m) for m in models]
+            _offer_benchmark_after_add(
+                provider.name, provider.base_url, _bm_key,
+                model_ids, Colors, self.config_dir,
+            )
         else:
             print(f"{Colors.RED}❌ 连接测试失败，配置未保存{Colors.ENDC}")
             retry = input("是否跳过连接测试，强制保存？[y/N]: ").strip().lower()
@@ -432,7 +649,7 @@ class SetupWizard:
                     self._save_env_var(provider.api_key_env, api_key)
                 self.config['providers'].append(provider_config)
                 print(f"{Colors.YELLOW}⚠️  {provider.name} 已强制保存（连接未验证）{Colors.ENDC}")
-    
+
     def _add_custom_provider(self):
         """添加自定义 Provider"""
         print(f"\n{Colors.BOLD}自定义 Provider{Colors.ENDC}")
@@ -509,6 +726,13 @@ class SetupWizard:
 
             self.config['providers'].append(provider_config)
             print(f"{Colors.GREEN}✅ {name} 配置成功并已保存！{Colors.ENDC}")
+            # 邀约进行能力测试
+            _bm_key = api_key if auth_type != "oauth" else (self._fetch_oauth_token(oauth_cfg) or "")
+            model_ids = [m.get('id', '') if isinstance(m, dict) else str(m) for m in models]
+            _offer_benchmark_after_add(
+                name, base_url, _bm_key,
+                model_ids, Colors, self.config_dir,
+            )
         else:
             print(f"{Colors.RED}❌ 连接测试失败，配置未保存{Colors.ENDC}")
             retry = input("是否跳过连接测试，强制保存？[y/N]: ").strip().lower()

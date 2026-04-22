@@ -1083,6 +1083,178 @@
   </div>
 </div>
 
+<!-- ═══════════════════ BENCHMARK OFFER MODAL ═══════════════════ -->
+<div x-show="showBenchmarkOffer" x-cloak @click.self="showBenchmarkOffer = false"
+  class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+  <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md border border-slate-200 dark:border-slate-700">
+    <div class="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700">
+      <div class="flex items-center gap-2">
+        <span class="text-xl">🧪</span>
+        <h2 class="text-base font-semibold text-slate-900 dark:text-white">模型能力测试</h2>
+      </div>
+      <button @click="showBenchmarkOffer = false" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xl leading-none">✕</button>
+    </div>
+    <div class="px-6 py-5 space-y-4">
+      <!-- Provider info -->
+      <div class="flex items-center gap-3 p-3 bg-purple-50 dark:bg-purple-900/20 rounded-xl border border-purple-100 dark:border-purple-800">
+        <span class="text-2xl">🔌</span>
+        <div>
+          <p class="text-sm font-semibold text-slate-900 dark:text-white" x-text="benchmarkOfferData.providerName"></p>
+          <p class="text-xs text-slate-500 dark:text-slate-400" x-text="benchmarkOfferData.modelIds.length + ' 个模型待测试'"></p>
+        </div>
+      </div>
+      <!-- Dimension list -->
+      <div>
+        <p class="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">测试覆盖 5 个能力维度：</p>
+        <div class="flex flex-wrap gap-1.5">
+          <span class="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-xs text-slate-600 dark:text-slate-300">💻 代码编程</span>
+          <span class="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-xs text-slate-600 dark:text-slate-300">🔢 数学推理</span>
+          <span class="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-xs text-slate-600 dark:text-slate-300">✍️ 文学创作</span>
+          <span class="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-xs text-slate-600 dark:text-slate-300">🌐 语言翻译</span>
+          <span class="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-xs text-slate-600 dark:text-slate-300">💬 日常对话</span>
+        </div>
+      </div>
+      <!-- Cost estimates -->
+      <div class="grid grid-cols-3 gap-3">
+        <div class="text-center p-3 bg-slate-50 dark:bg-slate-700/50 rounded-xl">
+          <p class="text-lg font-bold text-slate-800 dark:text-slate-100" x-text="benchmarkOfferData.calls"></p>
+          <p class="text-xs text-slate-400 mt-0.5">API 调用次数</p>
+        </div>
+        <div class="text-center p-3 bg-slate-50 dark:bg-slate-700/50 rounded-xl">
+          <p class="text-lg font-bold text-slate-800 dark:text-slate-100" x-text="'~' + (benchmarkOfferData.tokens / 1000).toFixed(0) + 'K'"></p>
+          <p class="text-xs text-slate-400 mt-0.5">Token 消耗</p>
+        </div>
+        <div class="text-center p-3 bg-slate-50 dark:bg-slate-700/50 rounded-xl">
+          <p class="text-lg font-bold text-slate-800 dark:text-slate-100" x-text="'~' + benchmarkOfferData.minutes + ' 分钟'"></p>
+          <p class="text-xs text-slate-400 mt-0.5">预计耗时</p>
+        </div>
+      </div>
+      <!-- Warning -->
+      <div class="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
+        <span class="text-amber-500 flex-shrink-0 mt-0.5">⚠️</span>
+        <p class="text-xs text-amber-700 dark:text-amber-300">测试将向各模型发起真实 API 请求，会消耗您的 API 配额。每题约 500–1000 tokens，实际费用取决于各平台定价。</p>
+      </div>
+      <!-- Buttons -->
+      <div class="flex gap-3 pt-1">
+        <button @click="showBenchmarkOffer = false"
+          class="flex-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 font-semibold py-2 rounded-lg text-sm transition-colors">
+          暂时跳过
+        </button>
+        <button @click="startBenchmark()"
+          class="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 rounded-lg text-sm transition-colors flex items-center justify-center gap-2">
+          🚀 开始测试
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ BENCHMARK PROGRESS MODAL ═══════════════════ -->
+<div x-show="showBenchmarkModal" x-cloak
+  class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+  <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl border border-slate-200 dark:border-slate-700 max-h-[85vh] flex flex-col">
+    <!-- Header -->
+    <div class="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">
+      <div class="flex items-center gap-2">
+        <span class="text-xl" x-text="benchmarkStatus?.status === 'done' ? '✅' : benchmarkStatus?.status === 'error' ? '❌' : '🧪'"></span>
+        <h2 class="text-base font-semibold text-slate-900 dark:text-white"
+          x-text="benchmarkStatus?.status === 'done' ? '测试完成' : benchmarkStatus?.status === 'error' ? '测试出错' : '测试进行中…'">
+        </h2>
+      </div>
+      <button x-show="benchmarkStatus?.status === 'done' || benchmarkStatus?.status === 'error'"
+        @click="closeBenchmarkModal()"
+        class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xl leading-none">✕</button>
+    </div>
+
+    <!-- Body -->
+    <div class="px-6 py-5 overflow-y-auto flex-1 space-y-4">
+
+      <!-- Running state -->
+      <div x-show="benchmarkStatus?.status === 'running' || benchmarkStatus?.status === 'pending'">
+        <!-- Progress bar -->
+        <div class="mb-3">
+          <div class="flex items-center justify-between text-xs text-slate-500 mb-1.5">
+            <span x-text="benchmarkStatus?.current_step || '准备中…'" class="truncate max-w-xs"></span>
+            <span x-text="(benchmarkStatus?.progress || 0) + '%'" class="font-mono flex-shrink-0 ml-2"></span>
+          </div>
+          <div class="w-full h-2.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+            <div class="h-full bg-purple-500 rounded-full transition-all duration-500"
+              :style="'width:' + (benchmarkStatus?.progress || 0) + '%'"></div>
+          </div>
+        </div>
+        <p class="text-xs text-slate-400 text-center">测试在后台运行，关闭此窗口不会中断测试</p>
+        <!-- Animated dots -->
+        <div class="flex justify-center gap-1.5 mt-3">
+          <span class="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style="animation-delay:0ms"></span>
+          <span class="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style="animation-delay:150ms"></span>
+          <span class="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style="animation-delay:300ms"></span>
+        </div>
+      </div>
+
+      <!-- Error state -->
+      <div x-show="benchmarkStatus?.status === 'error'"
+        class="flex items-start gap-3 p-4 bg-red-50 dark:bg-red-900/20 rounded-xl border border-red-200 dark:border-red-800">
+        <span class="text-red-500 text-xl flex-shrink-0">❌</span>
+        <div>
+          <p class="text-sm font-semibold text-red-700 dark:text-red-400">测试失败</p>
+          <p class="text-xs text-red-600 dark:text-red-300 mt-1" x-text="benchmarkStatus?.error || '未知错误'"></p>
+        </div>
+      </div>
+
+      <!-- Done state: results table -->
+      <div x-show="benchmarkStatus?.status === 'done' && benchmarkStatus?.results">
+        <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">以下为各模型在 5 个维度的能力得分（0–100），★ 越多越好：</p>
+        <div class="overflow-x-auto">
+          <table class="w-full text-xs">
+            <thead>
+              <tr class="text-slate-400 border-b border-slate-200 dark:border-slate-700">
+                <th class="text-left pb-2 font-medium pr-4">模型</th>
+                <th class="text-center pb-2 font-medium px-2">💻 代码</th>
+                <th class="text-center pb-2 font-medium px-2">🔢 数学</th>
+                <th class="text-center pb-2 font-medium px-2">✍️ 写作</th>
+                <th class="text-center pb-2 font-medium px-2">🌐 翻译</th>
+                <th class="text-center pb-2 font-medium px-2">💬 对话</th>
+                <th class="text-center pb-2 font-medium px-2">综合</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="[modelKey, dimResults] in Object.entries(benchmarkStatus.results || {})" :key="modelKey">
+                <tr class="border-b border-slate-100 dark:border-slate-700/50 last:border-0">
+                  <td class="py-2 pr-4 font-mono text-slate-700 dark:text-slate-300 text-xs" x-text="modelKey"></td>
+                  <template x-for="dim in ['coding','math','writing','translation','chat']" :key="dim">
+                    <td class="py-2 px-2 text-center">
+                      <span x-show="dimResults[dim]" class="text-amber-500 font-mono text-xs" x-text="dimResults[dim]?.stars || ''"></span>
+                      <span x-show="!dimResults[dim]" class="text-slate-300 dark:text-slate-600 text-xs">—</span>
+                    </td>
+                  </template>
+                  <td class="py-2 px-2 text-center">
+                    <span
+                      :class="(() => { const dims=['coding','math','writing','translation','chat']; const scores=dims.map(d=>dimResults[d]?.score||0); const avg=Math.round(scores.reduce((a,b)=>a+b,0)/scores.length); return avg>=70?'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400':avg>=50?'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400':'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'; })()"
+                      class="inline-block px-1.5 py-0.5 rounded text-xs font-bold"
+                      x-text="(() => { const dims=['coding','math','writing','translation','chat']; const scores=dims.map(d=>dimResults[d]?.score||0); return Math.round(scores.reduce((a,b)=>a+b,0)/scores.length); })()">
+                    </span>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+        <p class="mt-3 text-xs text-slate-400">详细结果已保存至 <code class="font-mono bg-slate-100 dark:bg-slate-700 px-1 rounded">~/.bridge-server/benchmark_results.yaml</code></p>
+      </div>
+
+    </div>
+
+    <!-- Footer -->
+    <div x-show="benchmarkStatus?.status === 'done' || benchmarkStatus?.status === 'error'"
+      class="px-6 py-4 border-t border-slate-200 dark:border-slate-700 flex-shrink-0">
+      <button @click="closeBenchmarkModal()"
+        class="w-full bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 font-semibold py-2 rounded-lg text-sm transition-colors">
+        关闭
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══════════════════ TOAST ═══════════════════ -->
 <div x-show="toast" x-cloak x-transition:enter="transition ease-out duration-200" x-transition:enter-start="translate-y-2 opacity-0" x-transition:enter-end="translate-y-0 opacity-100"
   x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
