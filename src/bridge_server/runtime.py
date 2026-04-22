@@ -817,6 +817,18 @@ async def chat_completions(
         
         messages = req_dict["messages"]
         stream = req_dict.get("stream", False)
+
+        # 提取并转发所有 OpenAI 兼容参数（tools、tool_choice 等）
+        # 关键：若不转发 tools，上游模型无法感知可用工具，会退化为 XML 文本格式
+        _FORWARDED_KEYS = (
+            "tools", "tool_choice", "parallel_tool_calls",
+            "stop", "response_format",
+            "presence_penalty", "frequency_penalty",
+            "top_p", "seed", "n",
+        )
+        extra_kwargs: Dict[str, Any] = {
+            k: req_dict[k] for k in _FORWARDED_KEYS if k in req_dict
+        }
         
         # 2. 并发执行用户信息查询和路由决策（性能优化）
         perf_parallel_start = time.perf_counter()
@@ -942,6 +954,7 @@ async def chat_completions(
                     route_result=route_result,
                     current_user=current_user,
                     req_dict=req_dict,
+                    extra_kwargs=extra_kwargs,
                     perf_start=perf_start
                 ),
                 media_type="text/event-stream",
@@ -959,7 +972,8 @@ async def chat_completions(
                     provider_id=route_result.provider_id,
                     max_tokens=req_dict.get("max_tokens", 4000),
                     temperature=req_dict.get("temperature", 0.7),
-                    stream=False
+                    stream=False,
+                    **extra_kwargs,
                 )
             except Exception:
                 llm_time = (time.perf_counter() - perf_llm_start) * 1000
@@ -1061,6 +1075,7 @@ async def _stream_chat_completion(
     route_result, 
     current_user: Dict[str, Any],
     req_dict: Dict[str, Any],
+    extra_kwargs: Dict[str, Any],
     perf_start: float
 ):
     """流式聊天完成，支持 reasoning_content（思维链模型）实时流出。
@@ -1101,6 +1116,7 @@ async def _stream_chat_completion(
             max_tokens=req_dict.get("max_tokens", 4000),
             temperature=req_dict.get("temperature", 0.7),
             stream_options={"include_usage": True},
+            **extra_kwargs,
         ):
             if isinstance(chunk, str):
                 try:
@@ -1159,6 +1175,7 @@ async def _stream_chat_completion(
                     max_tokens=req_dict.get("max_tokens", 4000),
                     temperature=req_dict.get("temperature", 0.7),
                     stream=False,
+                    **extra_kwargs,
                 )
                 # 将非流式响应转成两个 SSE chunk（content delta + stop）
                 resp_id = response.get("id") or f"chatcmpl-fallback-{int(time.time())}"
