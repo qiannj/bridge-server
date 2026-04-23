@@ -10,9 +10,10 @@ CLI 和主服务都通过此模块读取配置，避免不一致
 """
 
 import os
+import socket
 import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 # ============ 配置路径 ============
 
@@ -116,6 +117,67 @@ def get_server_url() -> str:
         host = 'localhost'
     
     return f"http://{host}:{port}"
+
+
+def _discover_runtime_host() -> Optional[str]:
+    """尽量推断当前机器对外可达的 IPv4 地址。"""
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.connect(("8.8.8.8", 80))
+        host = sock.getsockname()[0]
+        sock.close()
+        if host and not host.startswith("127."):
+            return host
+    except Exception:
+        pass
+
+    commands = [
+        ["hostname", "-I"],
+        ["hostname", "-i"],
+    ]
+    for command in commands:
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=2)
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+        if result.returncode != 0:
+            continue
+        for token in result.stdout.split():
+            if token and token.count(".") == 3 and not token.startswith("127."):
+                return token
+
+    return None
+
+
+def get_server_url_candidates() -> List[str]:
+    """返回 CLI 可尝试的服务 URL 候选列表。"""
+    candidates: List[str] = []
+
+    def _add(url: Optional[str]):
+        if not url:
+            return
+        url = url.rstrip('/')
+        if url not in candidates:
+            candidates.append(url)
+
+    env_url = os.getenv("BRIDGE_SERVER_URL")
+    if env_url:
+        _add(env_url)
+        return candidates
+
+    port = get_default_port()
+    host = get_default_host()
+
+    if host in ("0.0.0.0", "127.0.0.1", "localhost"):
+        _add(f"http://localhost:{port}")
+        _add(f"http://127.0.0.1:{port}")
+        runtime_host = _discover_runtime_host()
+        if runtime_host:
+            _add(f"http://{runtime_host}:{port}")
+    else:
+        _add(f"http://{host}:{port}")
+
+    return candidates
 
 
 def get_api_base_url() -> str:
@@ -286,6 +348,7 @@ __all__ = [
     'get_default_port',
     'get_default_host',
     'get_server_url',
+    'get_server_url_candidates',
     'get_api_base_url',
     'get_api_key_from_env',
     

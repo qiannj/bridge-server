@@ -62,3 +62,26 @@ def test_get_service_runtime_status_reports_running_from_process_and_port(
     assert status["port_listening"] is True
     assert status["running"] is True
     assert "timed out" in status["api_error"]
+
+
+def test_get_server_url_candidates_prefers_runtime_host_for_local_bind(monkeypatch, tmp_path):
+    module = load_cli_config_module(monkeypatch, tmp_path)
+    monkeypatch.setattr(module, "get_default_port", lambda: 19377)
+    monkeypatch.setattr(module, "get_default_host", lambda: "0.0.0.0")
+    monkeypatch.setattr(module, "_discover_runtime_host", lambda: "103.143.81.95")
+
+    assert module.get_server_url_candidates() == [
+        "http://localhost:19377",
+        "http://127.0.0.1:19377",
+        "http://103.143.81.95:19377",
+    ]
+
+
+def test_get_server_url_candidates_does_not_fallback_to_localhost_for_remote_host(
+    monkeypatch, tmp_path
+):
+    module = load_cli_config_module(monkeypatch, tmp_path)
+    monkeypatch.setattr(module, "get_default_port", lambda: 19377)
+    monkeypatch.setattr(module, "get_default_host", lambda: "10.0.0.5")
+
+    assert module.get_server_url_candidates() == ["http://10.0.0.5:19377"]

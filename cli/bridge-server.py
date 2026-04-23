@@ -22,6 +22,7 @@ from config import (
     LOG_FILE,
     USAGE_FILE,
     get_server_url,
+    get_server_url_candidates,
     get_default_port,
     get_api_key_from_env,
     is_service_running,
@@ -46,6 +47,30 @@ def print_success(text): print(f"{Colors.GREEN}✓{Colors.ENDC} {text}")
 def print_error(text): print(f"{Colors.RED}✗{Colors.ENDC} {text}")
 def print_warning(text): print(f"{Colors.YELLOW}⚠{Colors.ENDC} {text}")
 def print_info(text): print(f"{Colors.BLUE}ℹ{Colors.ENDC} {text}")
+
+
+def _iter_server_urls():
+    """按优先级返回可尝试的服务地址。"""
+    return get_server_url_candidates()
+
+
+def _request_with_fallback(method: str, path: str, retry_statuses=None, **kwargs):
+    """对多个候选服务地址执行请求，直到成功或命中最后一个错误。"""
+    last_error = None
+    retry_statuses = set(retry_statuses or [])
+    candidates = list(_iter_server_urls())
+    for index, base_url in enumerate(candidates):
+        url = f"{base_url.rstrip('/')}{path}"
+        try:
+            response = getattr(httpx, method.lower())(url, **kwargs)
+            if response.status_code in retry_statuses and index < len(candidates) - 1:
+                continue
+            return response
+        except Exception as exc:
+            last_error = exc
+    if last_error:
+        raise last_error
+    raise RuntimeError("未找到可用的 Bridge Server 地址")
 
 def load_config() -> dict:
     """加载配置文件"""
@@ -287,40 +312,37 @@ def cmd_logs(tail: int = 50, follow: bool = False):
 def cmd_test():
     """测试连接"""
     print(f"\n{Colors.BOLD}测试 Bridge Server 连接{Colors.ENDC}\n")
-    
-    server_url = get_server_url()
-    
+
     # 测试健康检查
     print("1. 健康检查...", end=" ")
     try:
-        response = httpx.get(f"{server_url}/health", timeout=5)
+        response = _request_with_fallback("GET", "/health", timeout=5)
         if response.status_code == 200:
             print_success("OK")
         else:
             print_error(f"失败：{response.status_code}")
     except Exception as e:
         print_error(f"失败：{e}")
-    
+
     # 测试 API
     print("2. API 测试...", end=" ")
     try:
-        response = httpx.post(
-            f"{server_url}/v1/chat/completions",
-            json={"messages": [{"role": "user", "content": "hi"}]},
-            headers={"Authorization": "Bearer test", "Content-Type": "application/json"},
-            timeout=10
+        response = _request_with_fallback(
+            "GET",
+            "/v1/models",
+            timeout=10,
         )
-        if response.status_code in [200, 401]:  # 401 表示认证正常
+        if response.status_code == 200:
             print_success("OK")
         else:
             print_error(f"失败：{response.status_code}")
     except Exception as e:
         print_error(f"失败：{e}")
-    
+
     # 测试路由
     print("3. 路由配置...", end=" ")
     try:
-        response = httpx.get(f"{server_url}/api/routing", timeout=5)
+        response = _request_with_fallback("GET", "/api/routing", timeout=5)
         if response.status_code == 200:
             print_success("OK")
             data = response.json()
@@ -329,7 +351,7 @@ def cmd_test():
             print_error(f"失败：{response.status_code}")
     except Exception as e:
         print_error(f"失败：{e}")
-    
+
     print()
 
 def cmd_usage(period: str = "today"):
@@ -628,21 +650,24 @@ def cmd_route_test(text: str):
 def cmd_routing_strategy():
     """查看路由策略（v1.6.0 新增）"""
     print(f"\n{Colors.BOLD}路由策略{Colors.ENDC}\n")
-    
+
     try:
-        import httpx
-        server_url = get_server_url()
-        response = httpx.get(f"{server_url}/api/v1/routing/strategy", timeout=5)
-        
+        response = _request_with_fallback("GET", "/api/routing", retry_statuses={404}, timeout=5)
+        if response.status_code == 404:
+            response = _request_with_fallback("GET", "/api/v1/routing/strategy", timeout=5)
+
         if response.status_code == 200:
             data = response.json()
             print(f"策略：{data.get('strategy', 'unknown')}")
+            effective = data.get('effective_strategy')
+            if effective:
+                print(f"生效策略：{effective}")
             print(f"模型映射：{json.dumps(data.get('model_mapping', {}), indent=2, ensure_ascii=False)}")
         else:
             print_error(f"获取失败：{response.status_code}")
     except Exception as e:
         print_error(f"获取失败：{e}")
-    
+
     print()
 
 
@@ -677,33 +702,51 @@ def cmd_routing_test(message: str):
 def cmd_providers_list():
     """列出 Provider（v1.6.0 新增）"""
     print(f"\n{Colors.BOLD}可用 Provider{Colors.ENDC}\n")
-    
+
     try:
-        import httpx
-        server_url = get_server_url()
-        response = httpx.get(f"{server_url}/api/v1/providers/list", timeout=5)
-        
+        response = _request_with_fallback("GET", "/api/models", retry_statuses={404}, timeout=5)
+        legacy_provider_payload = False
+        if response.status_code == 404:
+            response = _request_with_fallback("GET", "/api/v1/providers/list", timeout=5)
+            legacy_provider_payload = True
+
         if response.status_code == 200:
             data = response.json()
-            providers = data.get("providers", [])
-            
-            if not providers:
+            if legacy_provider_payload:
+                providers = data.get("providers", [])
+                provider_map = {
+                    prov.get("name", "unknown"): prov.get("models", [])
+                    for prov in providers
+                }
+            else:
+                models = data.get("models", [])
+                provider_map = {}
+                for model in models:
+                    provider_name = model.get("provider") or model.get("owned_by") or "unknown"
+                    provider_map.setdefault(provider_name, []).append(model)
+
+            if not provider_map:
                 print_info("暂无 Provider")
                 return
-            
-            for prov in providers:
-                status = "✓" if prov.get("enabled") else "✗"
-                print(f"{status} {prov.get('name', 'unknown')}")
-                models = prov.get("models", [])
-                for model in models[:5]:  # 只显示前 5 个
-                    print(f"    - {model.get('id')} (¥{model.get('cost', 0):.4f}/K tokens)")
-                if len(models) > 5:
-                    print(f"    ... 还有 {len(models) - 5} 个模型")
+
+            for provider_name in sorted(provider_map.keys()):
+                print(f"✓ {provider_name}")
+                for model in provider_map[provider_name][:5]:
+                    model_id = model.get("id", "unknown")
+                    cost = model.get("input_cost_per_1k")
+                    if cost is None:
+                        cost = model.get("cost")
+                    if cost is None:
+                        print(f"    - {model_id}")
+                    else:
+                        print(f"    - {model_id} (¥{float(cost):.4f}/K tokens)")
+                if len(provider_map[provider_name]) > 5:
+                    print(f"    ... 还有 {len(provider_map[provider_name]) - 5} 个模型")
         else:
             print_error(f"获取失败：{response.status_code}")
     except Exception as e:
         print_error(f"获取失败：{e}")
-    
+
     print()
 
 
