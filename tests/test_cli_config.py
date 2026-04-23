@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from conftest import REPO_ROOT, load_module
+from tests.conftest import REPO_ROOT, load_module
 
 
 def load_cli_config_module(monkeypatch, tmp_path):
@@ -38,3 +38,27 @@ def test_get_default_port_reads_config_file(monkeypatch, tmp_path):
 def test_get_default_port_defaults_to_19377(monkeypatch, tmp_path):
     module = load_cli_config_module(monkeypatch, tmp_path)
     assert module.get_default_port() == 19377
+
+
+def test_get_service_runtime_status_reports_running_from_process_and_port(
+    monkeypatch, tmp_path
+):
+    module = load_cli_config_module(monkeypatch, tmp_path)
+
+    class TimeoutHTTPX:
+        @staticmethod
+        def get(*args, **kwargs):
+            raise TimeoutError("timed out")
+
+    monkeypatch.setitem(__import__("sys").modules, "httpx", TimeoutHTTPX)
+    monkeypatch.setattr(module, "_has_bridge_server_process", lambda: True)
+    monkeypatch.setattr(module, "_is_port_listening", lambda port: True)
+    monkeypatch.setattr(module, "get_default_port", lambda: 19377)
+
+    status = module.get_service_runtime_status(timeout=0.01)
+
+    assert status["api_ok"] is False
+    assert status["process_running"] is True
+    assert status["port_listening"] is True
+    assert status["running"] is True
+    assert "timed out" in status["api_error"]

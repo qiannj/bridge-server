@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from conftest import REPO_ROOT, load_module
+from tests.conftest import REPO_ROOT, load_module
 
 
 cli = load_module("bridge_cli", REPO_ROOT / "cli" / "bridge-server.py")
@@ -40,3 +40,32 @@ def test_cmd_start_uses_canonical_runtime_entrypoint(monkeypatch, tmp_path):
     assert "--app-dir" in args
     assert "src" in args
     assert "19377" in args
+
+
+def test_cmd_status_reports_running_when_health_check_is_unreachable(
+    monkeypatch, tmp_path, capsys
+):
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("server:\n  port: 19377\n", encoding="utf-8")
+    monkeypatch.setattr(cli, "CONFIG_FILE", config_file)
+    monkeypatch.setattr(cli, "get_default_port", lambda: 19377)
+    monkeypatch.setattr(
+        cli,
+        "get_service_runtime_status",
+        lambda timeout=2: {
+            "api_ok": False,
+            "api_error": "timed out",
+            "process_running": True,
+            "port_listening": True,
+            "server_version": None,
+            "running": True,
+        },
+    )
+
+    cli.cmd_status()
+
+    out = capsys.readouterr().out
+    assert "服务状态：运行中（本地健康检查不可达）" in out
+    assert "进程：已检测到 Bridge Server 运行进程" in out
+    assert "端口 19377：已监听" in out
+    assert "本地 /health 检查失败：timed out" in out

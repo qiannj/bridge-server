@@ -89,22 +89,18 @@ chmod +x "$INSTALL_DIR/bridge-server"
 log_success "启动脚本创建完成：$INSTALL_DIR/bridge-server"
 
 # 添加到 PATH
-if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
-    log_info "将 CLI 添加到 PATH..."
-    mkdir -p ~/.local/bin
-    ln -sf "$INSTALL_DIR/bridge-server" ~/.local/bin/bridge-server
-    
-    # 添加到 shell 配置
-    if [[ -f ~/.bashrc ]]; then
-        grep -q "$HOME/.local/bin" ~/.bashrc || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-    fi
-    if [[ -f ~/.zshrc ]]; then
-        grep -q "$HOME/.local/bin" ~/.zshrc || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
-    fi
-    
-    log_success "CLI 已添加到 PATH：~/.local/bin/bridge-server"
-    log_info "请执行 'source ~/.bashrc' 或 'source ~/.zshrc' 使配置生效"
-fi
+mkdir -p ~/.local/bin
+ln -sf "$INSTALL_DIR/bridge-server" ~/.local/bin/bridge-server
+
+for shell_rc in ~/.profile ~/.bashrc ~/.zshrc; do
+    [ -f "$shell_rc" ] || touch "$shell_rc"
+    grep -q 'export PATH="$HOME/.local/bin:$PATH"' "$shell_rc" || \
+        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$shell_rc"
+done
+
+export PATH="$HOME/.local/bin:$PATH"
+log_success "CLI 已安装到：~/.local/bin/bridge-server"
+log_info "已确保 ~/.local/bin 写入 shell 配置并加入当前会话 PATH"
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

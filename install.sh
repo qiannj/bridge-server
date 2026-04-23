@@ -137,7 +137,9 @@ create_config() {
 # 安装 CLI 工具
 install_cli() {
     log_info "安装 CLI 工具..."
-    
+
+    mkdir -p ~/.local/bin
+
     # 创建启动脚本
     cat > "$INSTALL_DIR/bridge-server" << 'EOF'
 #!/bin/bash
@@ -145,24 +147,23 @@ INSTALL_DIR="$HOME/.local/opt/bridge-server"
 source "$INSTALL_DIR/venv/bin/activate"
 python3 "$INSTALL_DIR/cli/bridge-server.py" "$@"
 EOF
-    
+
     chmod +x "$INSTALL_DIR/bridge-server"
-    
-    # 添加到 PATH
-    if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
-        mkdir -p ~/.local/bin
-        ln -sf "$INSTALL_DIR/bridge-server" ~/.local/bin/bridge-server
-        log_info "已将 CLI 添加到 PATH：~/.local/bin/bridge-server"
-        
-        # 添加到 shell 配置
-        if [[ -f ~/.bashrc ]]; then
-            grep -q "$HOME/.local/bin" ~/.bashrc || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-        fi
-        if [[ -f ~/.zshrc ]]; then
-            grep -q "$HOME/.local/bin" ~/.zshrc || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
-        fi
-    fi
-    
+
+    # 无论当前 PATH 是否包含 ~/.local/bin，都确保命令入口存在
+    ln -sf "$INSTALL_DIR/bridge-server" ~/.local/bin/bridge-server
+    log_info "已创建 CLI 命令：~/.local/bin/bridge-server"
+
+    # 持久化 PATH，避免新 shell 找不到 bridge-server
+    for shell_rc in ~/.profile ~/.bashrc ~/.zshrc; do
+        [ -f "$shell_rc" ] || touch "$shell_rc"
+        grep -q 'export PATH="$HOME/.local/bin:$PATH"' "$shell_rc" || \
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$shell_rc"
+    done
+
+    export PATH="$HOME/.local/bin:$PATH"
+    log_info "已确保 ~/.local/bin 写入 shell 配置并加入当前会话 PATH"
+
     log_success "CLI 工具安装完成"
 }
 

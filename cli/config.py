@@ -10,6 +10,7 @@ CLI 和主服务都通过此模块读取配置，避免不一致
 """
 
 import os
+import subprocess
 from pathlib import Path
 from typing import Optional
 
@@ -181,22 +182,92 @@ def config_exists() -> bool:
     return CONFIG_FILE.exists()
 
 
-def is_service_running(timeout: float = 2.0) -> bool:
-    """
-    检查服务是否运行
-    
-    Args:
-        timeout: HTTP 请求超时时间（秒）
-    
-    Returns:
-        bool: 服务是否可访问
-    """
+def _is_port_listening(port: int) -> bool:
+    """检查目标端口是否存在监听。"""
+    commands = [
+        ["lsof", "-i", f":{port}"],
+        ["ss", "-tln"],
+    ]
+
+    for command in commands:
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=2)
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+
+        if command[0] == "lsof":
+            if result.returncode == 0 and result.stdout.strip():
+                return True
+        else:
+            needle = f":{port}"
+            if result.returncode == 0 and needle in result.stdout:
+                return True
+
+    return False
+
+
+def _has_bridge_server_process() -> bool:
+    """检查是否存在 Bridge Server 运行进程。"""
+    patterns = [
+        "uvicorn bridge_server.runtime:app",
+        "uvicorn app.main:app",
+        "python -m bridge_server.runtime",
+    ]
+
+    for pattern in patterns:
+        try:
+            result = subprocess.run(
+                ["pgrep", "-af", pattern],
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+
+        if result.returncode == 0 and result.stdout.strip():
+            return True
+
+    return False
+
+
+def get_service_runtime_status(timeout: float = 2.0) -> dict:
+    """综合检查 Bridge Server 运行状态。"""
+    status = {
+        "api_ok": False,
+        "api_error": None,
+        "process_running": False,
+        "port_listening": False,
+        "server_version": None,
+    }
+
     try:
         import httpx
+
         response = httpx.get(f"{get_server_url()}/health", timeout=timeout)
-        return response.status_code == 200
-    except Exception:
-        return False
+        if response.status_code == 200:
+            status["api_ok"] = True
+            try:
+                status["server_version"] = response.json().get("version")
+            except Exception:
+                status["server_version"] = None
+        else:
+            status["api_error"] = f"HTTP {response.status_code}"
+    except Exception as exc:
+        status["api_error"] = str(exc)
+
+    port = get_default_port()
+    status["process_running"] = _has_bridge_server_process()
+    status["port_listening"] = _is_port_listening(port)
+    status["running"] = status["api_ok"] or (
+        status["process_running"] and status["port_listening"]
+    )
+    return status
+
+
+def is_service_running(timeout: float = 2.0) -> bool:
+    """兼容旧接口：返回服务是否在运行。"""
+    return get_service_runtime_status(timeout=timeout)["running"]
 
 
 # ============ 常量导出 ============

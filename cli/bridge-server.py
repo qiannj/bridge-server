@@ -25,6 +25,7 @@ from config import (
     get_default_port,
     get_api_key_from_env,
     is_service_running,
+    get_service_runtime_status,
 )
 
 # 安装目录
@@ -92,38 +93,35 @@ def record_usage(model: str, tokens: int, cost: float):
 def cmd_status():
     """查看服务状态"""
     print(f"\n{Colors.BOLD}Bridge Server 状态{Colors.ENDC}\n")
-    
+
     # 检查配置文件
     if CONFIG_FILE.exists():
         print_success(f"配置文件：{CONFIG_FILE}")
     else:
         print_error("配置文件不存在")
-    
-    # 检查服务状态
-    try:
-        server_url = get_server_url()
-        response = httpx.get(f"{server_url}/health", timeout=2)
-        if response.status_code == 200:
-            print_success("服务状态：运行中")
-            data = response.json()
-            print_info(f"版本：{data.get('version', 'unknown')}")
-        else:
-            print_error("服务状态：异常")
-    except Exception:
+
+    status = get_service_runtime_status(timeout=2)
+
+    if status["api_ok"]:
+        print_success("服务状态：运行中")
+        if status.get("server_version"):
+            print_info(f"版本：{status['server_version']}")
+    elif status["running"]:
+        print_success("服务状态：运行中（本地健康检查不可达）")
+        if status["process_running"]:
+            print_info("进程：已检测到 Bridge Server 运行进程")
+        if status["api_error"]:
+            print_warning(f"本地 /health 检查失败：{status['api_error']}")
+    else:
         print_warning("服务状态：未运行")
-    
+
     # 检查端口
-    import subprocess
-    try:
-        port = get_default_port()
-        result = subprocess.run(["lsof", "-i", f":{port}"], capture_output=True, text=True)
-        if result.returncode == 0:
-            print_success(f"端口 {port}：已监听")
-        else:
-            print_warning(f"端口 {port}：未监听")
-    except Exception:
-        pass
-    
+    port = get_default_port()
+    if status["port_listening"]:
+        print_success(f"端口 {port}：已监听")
+    else:
+        print_warning(f"端口 {port}：未监听")
+
     print()
 
 def cmd_start():
