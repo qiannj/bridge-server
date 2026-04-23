@@ -330,9 +330,10 @@ def cmd_test():
         response = _request_with_fallback(
             "GET",
             "/v1/models",
+            headers={"Authorization": "Bearer test"},
             timeout=10,
         )
-        if response.status_code == 200:
+        if response.status_code in [200, 401]:
             print_success("OK")
         else:
             print_error(f"失败：{response.status_code}")
