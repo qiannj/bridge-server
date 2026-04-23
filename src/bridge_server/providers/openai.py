@@ -80,17 +80,43 @@ class OpenAIProvider(BaseProvider):
         return self._format_openai_compatible_messages(messages)
     
     async def health_check(self) -> ProviderStatus:
-        """用 GET /models 做轻量探活，避免 thinking 模型超时。"""
+        """用 GET /models 做轻量探活，必要时回退到 HTTP/1.1。"""
         try:
             response = await asyncio.wait_for(
                 self.client.get("/models"),
                 timeout=10.0,
             )
             # 200 = OK；401/403 = key 问题但服务可达（视为 healthy，key 在配置时已验证）
-            if response.status_code < 500:
+            if response.status_code in (200, 401, 403):
                 return ProviderStatus.HEALTHY
             return ProviderStatus.UNHEALTHY
         except Exception as e:
+            import httpx
+
+            retryable_errors = (
+                httpx.ConnectError,
+                httpx.ConnectTimeout,
+                httpx.ReadTimeout,
+                httpx.RemoteProtocolError,
+            )
+            if isinstance(e, retryable_errors):
+                try:
+                    async with httpx.AsyncClient(
+                        base_url=self.config.get("base_url", ""),
+                        headers=self._get_headers(),
+                        timeout=self.config.get("timeout", 30.0),
+                        http2=False,
+                        follow_redirects=True,
+                    ) as fallback_client:
+                        response = await asyncio.wait_for(
+                            fallback_client.get("/models"),
+                            timeout=10.0,
+                        )
+                    if response.status_code in (200, 401, 403):
+                        return ProviderStatus.HEALTHY
+                except Exception:
+                    pass
+
             import logging
             logging.getLogger(__name__).warning(
                 f"健康检查失败 | Provider: {self.provider_id} | {e}"

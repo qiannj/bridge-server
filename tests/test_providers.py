@@ -2,7 +2,8 @@
 
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -115,7 +116,7 @@ class TestBaseProviderMetrics:
     def setup_provider(self, mock_http_client):
         from bridge_server.providers.dashscope import DashScopeProvider
 
-        self._provider = DashScopeProvider({"api_key": "test-key"})
+        self._provider = DashScopeProvider({"api_key": "***"})
 
     def test_success_rate_at_zero_requests(self):
         assert self._provider.metrics.success_rate == 1.0
@@ -147,3 +148,48 @@ class TestBaseProviderMetrics:
 
     def test_get_model_info_missing(self):
         assert self._provider.get_model_info("nonexistent-model-xyz") is None
+
+
+@pytest.mark.asyncio
+async def test_openai_health_check_retries_without_http2_after_connect_error(mock_http_client):
+    import httpx
+    from bridge_server.providers.base import ProviderStatus
+    from bridge_server.providers.openai import OpenAIProvider
+
+    provider = OpenAIProvider({"id": "scnet", "api_key": "***", "base_url": "https://example.com"})
+    provider.client.get = AsyncMock(side_effect=httpx.ConnectError("boom"))
+
+    fallback_response = SimpleNamespace(status_code=401)
+    fallback_client = MagicMock()
+    fallback_client.__aenter__.return_value = fallback_client
+    fallback_client.__aexit__.return_value = False
+    fallback_client.get = AsyncMock(return_value=fallback_response)
+
+    with patch("httpx.AsyncClient", return_value=fallback_client) as client_factory:
+        status = await provider.health_check()
+
+    assert status == ProviderStatus.HEALTHY
+    client_factory.assert_called_once()
+    _, kwargs = client_factory.call_args
+    assert kwargs["http2"] is False
+
+
+@pytest.mark.asyncio
+async def test_openai_health_check_does_not_treat_404_as_healthy(mock_http_client):
+    import httpx
+    from bridge_server.providers.base import ProviderStatus
+    from bridge_server.providers.openai import OpenAIProvider
+
+    provider = OpenAIProvider({"id": "scnet", "api_key": "***", "base_url": "https://example.com"})
+    provider.client.get = AsyncMock(side_effect=httpx.ConnectError("boom"))
+
+    fallback_response = SimpleNamespace(status_code=404)
+    fallback_client = MagicMock()
+    fallback_client.__aenter__.return_value = fallback_client
+    fallback_client.__aexit__.return_value = False
+    fallback_client.get = AsyncMock(return_value=fallback_response)
+
+    with patch("httpx.AsyncClient", return_value=fallback_client):
+        status = await provider.health_check()
+
+    assert status == ProviderStatus.UNHEALTHY
