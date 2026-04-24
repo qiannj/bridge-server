@@ -7,7 +7,8 @@ OpenAI Provider - OpenAI官方接口
 import asyncio
 import json
 import os
-from typing import Dict, Any, AsyncGenerator
+import time
+from typing import Dict, Any, AsyncGenerator, List, Tuple
 from .base import BaseProvider, ModelInfo, ProviderFactory, ProviderStatus
 
 
@@ -78,6 +79,180 @@ class OpenAIProvider(BaseProvider):
     def _format_messages(self, messages: list) -> list:
         """格式化消息为OpenAI格式"""
         return self._format_openai_compatible_messages(messages)
+
+    def _is_codex_backend(self) -> bool:
+        oauth_cfg = self.config.get("oauth") or {}
+        base_url = str(self.config.get("base_url") or "").lower()
+        return oauth_cfg.get("provider") == "openai_codex" or "chatgpt.com/backend-api/codex" in base_url
+
+    def _build_codex_responses_payload(
+        self,
+        messages: list,
+        model: str,
+        stream: bool,
+        kwargs: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        instructions_parts: List[str] = []
+        input_items: List[Dict[str, Any]] = []
+
+        for msg in self._format_openai_compatible_messages(messages):
+            role = msg.get("role")
+            content = msg.get("content")
+            if role == "system":
+                if isinstance(content, str) and content.strip():
+                    instructions_parts.append(content.strip())
+                elif isinstance(content, list):
+                    for part in content:
+                        if isinstance(part, dict) and part.get("type") == "text" and part.get("text"):
+                            instructions_parts.append(str(part["text"]).strip())
+                continue
+
+            codex_content: List[Dict[str, Any]] = []
+            if isinstance(content, str):
+                codex_content.append({"type": "input_text", "text": content})
+            elif isinstance(content, list):
+                for part in content:
+                    if not isinstance(part, dict):
+                        continue
+                    part_type = part.get("type")
+                    if part_type == "text" and part.get("text") is not None:
+                        codex_content.append({"type": "input_text", "text": str(part.get("text", ""))})
+                    elif part_type == "input_text" and part.get("text") is not None:
+                        codex_content.append({"type": "input_text", "text": str(part.get("text", ""))})
+                    elif part_type == "image_url":
+                        image_url = part.get("image_url")
+                        if isinstance(image_url, dict):
+                            image_url = image_url.get("url")
+                        if image_url:
+                            codex_content.append({"type": "input_image", "image_url": str(image_url)})
+            if not codex_content:
+                codex_content.append({"type": "input_text", "text": ""})
+
+            input_items.append({
+                "type": "message",
+                "role": role or "user",
+                "content": codex_content,
+            })
+
+        payload: Dict[str, Any] = {
+            "model": model,
+            "instructions": "\n\n".join(part for part in instructions_parts if part) or "You are a helpful assistant.",
+            "input": input_items or [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": ""}]}],
+            "stream": stream,
+            "store": False,
+        }
+        if "temperature" in kwargs:
+            payload["temperature"] = kwargs["temperature"]
+        if "top_p" in kwargs:
+            payload["top_p"] = kwargs["top_p"]
+        return payload
+
+    async def _collect_codex_response(self, payload: Dict[str, Any]) -> Tuple[Dict[str, Any], str]:
+        response_id = ""
+        text_parts: List[str] = []
+        async with self.client.stream(
+            "POST",
+            "/responses",
+            json=payload,
+            headers={"Accept": "text/event-stream"},
+        ) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if not line or not line.startswith("data: "):
+                    continue
+                raw = line[6:].strip()
+                if not raw:
+                    continue
+                try:
+                    event = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                event_type = event.get("type")
+                if event_type in {"response.created", "response.in_progress", "response.completed"}:
+                    resp = event.get("response") or {}
+                    response_id = response_id or str(resp.get("id") or "")
+                elif event_type == "response.output_text.delta":
+                    text_parts.append(str(event.get("delta") or ""))
+                elif event_type == "response.output_text.done" and not text_parts:
+                    text_parts.append(str(event.get("text") or ""))
+        result = {
+            "id": response_id or f"codex-resp-{int(time.time() * 1000)}",
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": payload.get("model"),
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "".join(text_parts)},
+                    "finish_reason": "stop",
+                }
+            ],
+        }
+        return result, "".join(text_parts)
+
+    async def _stream_codex_response(self, payload: Dict[str, Any]) -> AsyncGenerator[str, None]:
+        chunk_id = f"chatcmpl-codex-{int(time.time() * 1000)}"
+        sent_role = False
+        async with self.client.stream(
+            "POST",
+            "/responses",
+            json=payload,
+            headers={"Accept": "text/event-stream"},
+        ) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if not line or not line.startswith("data: "):
+                    continue
+                raw = line[6:].strip()
+                if not raw:
+                    continue
+                try:
+                    event = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                event_type = event.get("type")
+                if event_type == "response.created":
+                    resp = event.get("response") or {}
+                    chunk_id = str(resp.get("id") or chunk_id)
+                elif event_type == "response.output_text.delta":
+                    delta_text = str(event.get("delta") or "")
+                    if not sent_role:
+                        yield json.dumps({
+                            "id": chunk_id,
+                            "object": "chat.completion.chunk",
+                            "created": int(time.time()),
+                            "model": payload.get("model"),
+                            "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": None}],
+                            "provider": "openai",
+                        }, ensure_ascii=False)
+                        sent_role = True
+                    yield json.dumps({
+                        "id": chunk_id,
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": payload.get("model"),
+                        "choices": [{"index": 0, "delta": {"content": delta_text}, "finish_reason": None}],
+                        "provider": "openai",
+                    }, ensure_ascii=False)
+                elif event_type == "response.completed":
+                    if not sent_role:
+                        yield json.dumps({
+                            "id": chunk_id,
+                            "object": "chat.completion.chunk",
+                            "created": int(time.time()),
+                            "model": payload.get("model"),
+                            "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": None}],
+                            "provider": "openai",
+                        }, ensure_ascii=False)
+                    yield json.dumps({
+                        "id": chunk_id,
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": payload.get("model"),
+                        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                        "provider": "openai",
+                    }, ensure_ascii=False)
+                    return
     
     async def health_check(self) -> ProviderStatus:
         """用 GET /models 做轻量探活，避免 thinking 模型超时。"""
@@ -100,7 +275,11 @@ class OpenAIProvider(BaseProvider):
     async def _make_request(self, messages: list, model: str = None, **kwargs) -> Dict[str, Any]:
         """发起OpenAI请求"""
         model = model or "gpt-3.5-turbo"
-        
+        if self._is_codex_backend():
+            payload = self._build_codex_responses_payload(messages, model, stream=True, kwargs=kwargs)
+            result, _ = await self._collect_codex_response(payload)
+            return result
+
         payload = self._build_openai_compatible_payload(
             model=model,
             messages=messages,
@@ -123,7 +302,12 @@ class OpenAIProvider(BaseProvider):
     async def _make_stream_request(self, messages: list, model: str = None, **kwargs) -> AsyncGenerator[str, None]:
         """发起OpenAI流式请求，支持 reasoning_content（思维链模型）"""
         model = model or "gpt-3.5-turbo"
-        
+        if self._is_codex_backend():
+            payload = self._build_codex_responses_payload(messages, model, stream=True, kwargs=kwargs)
+            async for chunk in self._stream_codex_response(payload):
+                yield chunk
+            return
+
         payload = self._build_openai_compatible_payload(
             model=model,
             messages=messages,

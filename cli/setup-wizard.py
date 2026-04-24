@@ -109,6 +109,60 @@ def _bm_call_model(base_url: str, api_key: str, model_id: str,
                    prompt: str, timeout: int = 60) -> Tuple[str, float, str]:
     """Synchronous model call for benchmark. Returns (content, latency_sec, error)."""
     url = base_url.rstrip("/")
+    if "chatgpt.com/backend-api/codex" in url.lower():
+        if url.endswith("/models"):
+            url = url[: -len("/models")]
+        if not url.endswith("/responses"):
+            url += "/responses"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+            "User-Agent": "BridgeServer/2.0",
+        }
+        payload = {
+            "model": model_id,
+            "instructions": "You are a helpful assistant.",
+            "store": False,
+            "stream": True,
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": prompt}],
+                }
+            ],
+        }
+        t0 = time.perf_counter()
+        try:
+            with httpx.stream("POST", url, json=payload, headers=headers, timeout=timeout) as resp:
+                latency = time.perf_counter() - t0
+                resp.raise_for_status()
+                text_parts: List[str] = []
+                for line in resp.iter_lines():
+                    if not line:
+                        continue
+                    if isinstance(line, bytes):
+                        line = line.decode("utf-8", "ignore")
+                    if not str(line).startswith("data: "):
+                        continue
+                    raw = str(line)[6:].strip()
+                    if not raw:
+                        continue
+                    try:
+                        event = json.loads(raw)
+                    except json.JSONDecodeError:
+                        continue
+                    if event.get("type") == "response.output_text.delta":
+                        text_parts.append(str(event.get("delta") or ""))
+                    elif event.get("type") == "response.output_text.done" and not text_parts:
+                        text_parts.append(str(event.get("text") or ""))
+                return "".join(text_parts).strip(), latency, ""
+        except httpx.TimeoutException:
+            return "", time.perf_counter() - t0, f"超时（>{timeout}s）"
+        except Exception as e:
+            return "", time.perf_counter() - t0, str(e)[:120]
+
     if not url.endswith("/chat/completions"):
         url += "/chat/completions"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
@@ -946,6 +1000,41 @@ class SetupWizard:
     def _test_provider_connection(self, base_url: str, api_key: str, model_id: str) -> bool:
         """测试 Provider 连接"""
         try:
+            lowered_base_url = base_url.rstrip('/').lower()
+            if "chatgpt.com/backend-api/codex" in lowered_base_url:
+                test_url = lowered_base_url
+                if test_url.endswith('/models'):
+                    test_url = test_url[:-len('/models')]
+                if not test_url.endswith('/responses'):
+                    test_url = test_url + '/responses'
+                headers = {
+                    'Content-Type': 'application/json',
+                    'Accept': 'text/event-stream',
+                    'Authorization': f'Bearer {api_key}',
+                    'User-Agent': 'BridgeServer/2.0',
+                }
+                data = {
+                    'model': model_id,
+                    'instructions': 'You are a helpful assistant.',
+                    'store': False,
+                    'stream': True,
+                    'input': [
+                        {
+                            'type': 'message',
+                            'role': 'user',
+                            'content': [{'type': 'input_text', 'text': 'Hi'}],
+                        }
+                    ],
+                }
+                print(f"  请求：POST {test_url}")
+                print(f"  模型：{model_id}")
+                response = httpx.post(test_url, json=data, headers=headers, timeout=20)
+                if response.status_code == 200:
+                    print(f"  {Colors.GREEN}✓ 连接成功 (HTTP {response.status_code}){Colors.ENDC}")
+                    return True
+                print(f"  {Colors.RED}✗ 连接失败 (HTTP {response.status_code}): {response.text[:100]}{Colors.ENDC}")
+                return False
+
             # 若 base_url 已以 /chat/completions 结尾则直接使用，否则拼接
             stripped = base_url.rstrip('/')
             if stripped.endswith('/chat/completions'):
