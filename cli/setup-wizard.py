@@ -1044,8 +1044,16 @@ class SetupWizard:
         print("等待授权完成...（Ctrl+C 可取消）")
         deadline = time.monotonic() + 15 * 60
         code_resp = None
+        poll_start = time.monotonic()
+        last_dot = time.monotonic()
         while time.monotonic() < deadline:
             time.sleep(poll_interval)
+            # Show elapsed time every ~10 seconds
+            now = time.monotonic()
+            if now - last_dot >= 10:
+                elapsed = int(now - poll_start)
+                print(f"  ⏳ 已等待 {elapsed}s，还剩 {max(0, 900 - elapsed)}s ...", flush=True)
+                last_dot = now
             poll_resp = httpx.post(
                 f"{issuer}/api/accounts/deviceauth/token",
                 json={"device_auth_id": device_auth_id, "user_code": user_code},
@@ -1067,6 +1075,7 @@ class SetupWizard:
         if not authorization_code or not code_verifier:
             raise RuntimeError("OpenAI Codex 授权响应缺少 authorization_code 或 code_verifier")
 
+        print("  🔄 交换 Token 中...", flush=True)
         token_resp = httpx.post(
             CODEX_OAUTH_TOKEN_URL,
             data={
@@ -1088,16 +1097,42 @@ class SetupWizard:
         if not access_token or not refresh_token:
             raise RuntimeError("OpenAI Codex Token 响应缺少 access_token 或 refresh_token")
 
+        expires_in = int(token_payload.get("expires_in", 3600) or 3600)
+        expires_at_unix = time.time() + expires_in
+
         return {
             "tokens": {
                 "access_token": access_token,
                 "refresh_token": refresh_token,
+                "expires_at": expires_at_unix,
             },
+            "expires_in": expires_in,
             "base_url": CODEX_BASE_URL,
             "last_refresh": datetime.utcnow().isoformat() + 'Z',
         }
 
     def _collect_openai_codex_oauth_config(self, provider_name: str = 'openai') -> Optional[Dict[str, Any]]:
+        auth_store_key = provider_name.strip() or 'openai'
+
+        # Check if tokens already exist and are still valid
+        existing = self._load_existing_codex_tokens(auth_store_key)
+        if existing:
+            expires_at = existing.get('expires_at', 0)
+            remaining = expires_at - time.time() if expires_at else 0
+            if remaining > 120:
+                mins = int(remaining // 60)
+                print(f"\n{Colors.GREEN}✓ 检测到已有有效的 OpenAI Codex 登录状态（剩余约 {mins} 分钟）{Colors.ENDC}")
+                reuse = input("  是否跳过重新登录？[Y/n]: ").strip().lower()
+                if reuse != 'n':
+                    return {
+                        'provider': 'openai_codex',
+                        'auth_store_key': auth_store_key,
+                        'client_id': CODEX_OAUTH_CLIENT_ID,
+                        'token_url': CODEX_OAUTH_TOKEN_URL,
+                        'grant_type': 'refresh_token',
+                        'base_url': CODEX_BASE_URL,
+                    }
+
         try:
             login_result = self._run_openai_codex_oauth_login()
         except KeyboardInterrupt:
@@ -1107,7 +1142,6 @@ class SetupWizard:
             print(f"{Colors.RED}✗ OpenAI Codex OAuth 登录失败：{exc}{Colors.ENDC}")
             return None
 
-        auth_store_key = provider_name.strip() or 'openai'
         self._save_oauth_auth_store(
             auth_store_key,
             {
@@ -1117,8 +1151,13 @@ class SetupWizard:
                 'base_url': login_result.get('base_url', CODEX_BASE_URL),
             },
         )
-        print(f"{Colors.GREEN}✓ OpenAI Codex OAuth 登录成功，凭据已保存到 {self._auth_store_path()}{Colors.ENDC}")
-        return {
+
+        expires_in = login_result.get('expires_in', 3600)
+        mins = expires_in // 60
+        print(f"{Colors.GREEN}✓ OpenAI Codex OAuth 登录成功，凭据已保存（Token 有效期约 {mins} 分钟）{Colors.ENDC}")
+        print(f"  📁 存储路径：{self._auth_store_path()}")
+
+        oauth_cfg = {
             'provider': 'openai_codex',
             'auth_store_key': auth_store_key,
             'client_id': CODEX_OAUTH_CLIENT_ID,
@@ -1127,11 +1166,34 @@ class SetupWizard:
             'base_url': login_result.get('base_url', CODEX_BASE_URL),
         }
 
+        # Quick connectivity test using the freshly issued token
+        print("  🔍 验证 Token 连通性...", flush=True)
+        token = self._fetch_oauth_token(oauth_cfg)
+        if not token:
+            print(f"{Colors.YELLOW}⚠️  Token 获取验证失败，请检查网络或稍后重试{Colors.ENDC}")
+
+        return oauth_cfg
+
+    def _load_existing_codex_tokens(self, auth_store_key: str) -> Optional[Dict]:
+        """Return token dict from auth store if it has a refresh_token, else None."""
+        path = self._auth_store_path()
+        if not path.exists():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding='utf-8'))
+            provider_state = (data.get('providers') or {}).get(auth_store_key) or {}
+            tokens = provider_state.get('tokens') or {}
+            if tokens.get('refresh_token'):
+                return tokens
+        except Exception:
+            pass
+        return None
+
     def _fetch_oauth_token(self, oauth_cfg: Dict[str, Any]) -> Optional[str]:
         """获取 OAuth access_token，失败返回 None。"""
         if oauth_cfg.get('provider') == 'openai_codex':
             try:
-                from bridge_server.providers.oauth_manager import OAuthTokenManager
+                from bridge_server.providers.oauth_manager import OAuthTokenManager, OAuthTokenRevokedException
                 manager = OAuthTokenManager(
                     token_url=oauth_cfg['token_url'],
                     client_id=oauth_cfg['client_id'],
@@ -1142,6 +1204,9 @@ class SetupWizard:
                 if token:
                     print(f"  {Colors.GREEN}✓ OAuth Token 获取成功{Colors.ENDC}")
                     return token
+            except OAuthTokenRevokedException:
+                print(f"  {Colors.RED}✗ Refresh Token 已失效，请重新运行 setup-wizard 登录{Colors.ENDC}")
+                return None
             except Exception as e:
                 print(f"  {Colors.RED}✗ OAuth 请求失败：{e}{Colors.ENDC}")
                 return None
