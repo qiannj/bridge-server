@@ -39,7 +39,7 @@ logging.basicConfig(
 )
 
 
-CODEX_OAUTH_CLIENT_ID = "app_EMSIwP0jz89reVQ2vW0gjmN6r4an"
+CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 CODEX_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
 CODEX_OAUTH_DEVICE_ISSUER = "https://auth.openai.com"
 CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
