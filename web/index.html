@@ -299,6 +299,10 @@
                   </td>
                   <td class="px-4 py-3 text-right">
                     <button
+                      @click="promptBenchmark(p.name, (p.models||[]).map(m => typeof m === 'string' ? m : m.id))"
+                      class="text-xs text-purple-500 hover:text-purple-700 dark:hover:text-purple-300 font-medium transition-colors px-2 py-1 rounded hover:bg-purple-50 dark:hover:bg-purple-900/30 mr-1"
+                    >🧪 测试</button>
+                    <button
                       @click="startEdit(p)"
                       class="text-xs text-brand-500 hover:text-brand-700 dark:hover:text-brand-300 font-medium transition-colors px-2 py-1 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 mr-1"
                     >编辑</button>
@@ -332,6 +336,13 @@
                         <th class="text-left pb-1 font-medium">模型 ID</th>
                         <th class="text-right pb-1 font-medium">输入 ¥/1K</th>
                         <th class="text-right pb-1 font-medium">输出 ¥/1K</th>
+                        <th class="text-center pb-1 font-medium">💻</th>
+                        <th class="text-center pb-1 font-medium">🔢</th>
+                        <th class="text-center pb-1 font-medium">✍️</th>
+                        <th class="text-center pb-1 font-medium">🌐</th>
+                        <th class="text-center pb-1 font-medium">💬</th>
+                        <th class="text-center pb-1 font-medium">综合</th>
+                        <th class="text-right pb-1 font-medium"></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -339,11 +350,40 @@
                         <tr class="border-b border-slate-50 dark:border-slate-700/50 last:border-0">
                           <td class="py-1 pr-4 font-mono text-slate-700 dark:text-slate-300" x-text="m.id || m"></td>
                           <td class="py-1 pr-2 text-right text-slate-500 dark:text-slate-400" x-text="m.input_cost ? '¥' + Number(m.input_cost).toFixed(4) : '—'"></td>
-                          <td class="py-1 text-right text-slate-500 dark:text-slate-400" x-text="m.output_cost ? '¥' + Number(m.output_cost).toFixed(4) : '—'"></td>
+                          <td class="py-1 pr-2 text-right text-slate-500 dark:text-slate-400" x-text="m.output_cost ? '¥' + Number(m.output_cost).toFixed(4) : '—'"></td>
+                          <template x-for="dim in benchmarkDimKeys()" :key="dim">
+                            <td class="py-1 text-center">
+                              <span
+                                :class="getBenchmarkScore(p.name, m.id||m, dim) ? 'text-amber-500' : 'text-slate-300 dark:text-slate-600'"
+                                class="font-mono text-xs"
+                                x-text="getBenchmarkScore(p.name, m.id||m, dim)?.stars || '·····'"
+                              ></span>
+                            </td>
+                          </template>
+                          <td class="py-1 text-center">
+                            <span
+                              x-show="getModelOverallScore(p.name, m.id||m) !== null"
+                              :class="getModelOverallScore(p.name, m.id||m) >= 70 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : getModelOverallScore(p.name, m.id||m) >= 50 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'"
+                              class="inline-block px-1.5 py-0.5 rounded text-xs font-bold"
+                              x-text="getModelOverallScore(p.name, m.id||m)"
+                            ></span>
+                            <span x-show="getModelOverallScore(p.name, m.id||m) === null" class="text-slate-300 dark:text-slate-600">—</span>
+                          </td>
+                          <td class="py-1 text-right">
+                            <button
+                              @click="promptBenchmark(p.name, [m.id||m])"
+                              class="text-purple-400 hover:text-purple-600 dark:hover:text-purple-300 font-medium transition-colors px-1 py-0.5 rounded hover:bg-purple-50 dark:hover:bg-purple-900/30"
+                              title="测试此模型能力"
+                            >🧪</button>
+                          </td>
                         </tr>
                       </template>
                     </tbody>
                   </table>
+                  <p x-show="benchmarkSavedResults && Object.keys(benchmarkSavedResults.results||{}).length > 0"
+                     class="mt-2 text-xs text-slate-400">
+                    📊 能力分 0–100，上次测试：<span x-text="benchmarkSavedResults?.generated_at ? new Date(benchmarkSavedResults.generated_at).toLocaleString('zh-CN') : '—'"></span>
+                  </p>
                 </div>
               </div>
             </details>
@@ -353,6 +393,28 @@
 
       <!-- ── ROUTING ── -->
       <div x-show="page === 'routing'" x-cloak>
+
+        <!-- Routing priority status bar -->
+        <div x-show="bypassRouter.enabled || activeCustomRouter"
+          class="mb-4 flex items-center gap-2 px-4 py-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 text-xs text-slate-500 dark:text-slate-400 flex-wrap">
+          <span class="font-semibold text-slate-600 dark:text-slate-300 flex-shrink-0">当前路由优先级：</span>
+          <span class="px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300">1 · 客户端指定模型</span>
+          <span class="text-slate-300 dark:text-slate-600">›</span>
+          <span :class="bypassRouter.enabled ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 font-semibold ring-1 ring-purple-300 dark:ring-purple-700' : 'bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500 line-through'"
+            class="px-2 py-0.5 rounded">
+            2 · 旁路路由器<template x-if="bypassRouter.enabled"> <span class="ml-1">✓</span></template>
+          </span>
+          <span class="text-slate-300 dark:text-slate-600">›</span>
+          <span :class="activeCustomRouter && !bypassRouter.enabled ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-semibold ring-1 ring-blue-300 dark:ring-blue-700' : (activeCustomRouter && bypassRouter.enabled ? 'bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500 line-through' : 'bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500')"
+            class="px-2 py-0.5 rounded"
+            x-text="activeCustomRouter ? ('3 · 插件路由器「' + activeCustomRouter + '」') : '3 · 插件路由器'">
+          </span>
+          <span class="text-slate-300 dark:text-slate-600">›</span>
+          <span class="px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400">4 · 场景路由（本页）</span>
+          <template x-if="bypassRouter.enabled && activeCustomRouter">
+            <span class="ml-auto text-amber-600 dark:text-amber-400 font-medium flex-shrink-0">⚠️ 插件路由器被旁路路由器覆盖</span>
+          </template>
+        </div>
 
         <!-- Strategy row -->
         <div class="bg-white dark:bg-slate-800 rounded-xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm mb-4 flex items-center gap-4">
@@ -469,6 +531,160 @@
             </template>
           </div>
         </div>
+      </div>
+
+      <!-- ── BYPASS ROUTER ── -->
+      <div x-show="page === 'bypass-router'" x-cloak>
+
+        <!-- Info banner -->
+        <div class="mb-4 flex items-start gap-3 p-4 bg-purple-50 dark:bg-purple-900/20 rounded-xl border border-purple-200 dark:border-purple-800">
+          <span class="text-2xl flex-shrink-0">🧠</span>
+          <div>
+            <p class="text-sm font-semibold text-purple-900 dark:text-purple-200">旁路模型路由器</p>
+            <p class="text-xs text-purple-700 dark:text-purple-300 mt-0.5">指定一个 LLM 作为路由决策模型，根据你的路由规则自动选择最合适的执行模型，并可选地对长对话上下文进行压缩后再发送。优先级高于场景路由，低于客户端明确指定的 model。</p>
+          </div>
+        </div>
+
+        <!-- Mutual-exclusion warning: custom plugin router is active -->
+        <div x-show="activeCustomRouter" x-cloak
+          class="mb-4 flex items-start gap-3 p-4 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800">
+          <span class="text-xl flex-shrink-0 mt-0.5">⚠️</span>
+          <div class="flex-1">
+            <p class="text-sm font-semibold text-amber-800 dark:text-amber-300">
+              代码插件路由器「<span x-text="activeCustomRouter" class="font-mono"></span>」当前已激活
+            </p>
+            <p class="text-xs text-amber-700 dark:text-amber-400 mt-1">
+              旁路路由器与代码插件路由器是<strong>同级替代方案</strong>。
+              <template x-if="bypassRouter.enabled">
+                <span>由于旁路路由器已启用，代码插件路由器将被<strong>跳过</strong>。如需使用代码插件路由器，请先关闭旁路路由器。</span>
+              </template>
+              <template x-if="!bypassRouter.enabled">
+                <span>若启用旁路路由器，代码插件路由器将被跳过，两者同时只有一个生效。</span>
+              </template>
+            </p>
+          </div>
+        </div>
+
+        <!-- Config card -->
+        <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm mb-4">
+          <div class="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-700">
+            <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300">路由器设置</h3>
+            <div class="flex items-center gap-2">
+              <!-- Enable toggle -->
+              <span class="text-xs text-slate-500 dark:text-slate-400">启用</span>
+              <button
+                @click="bypassRouter.enabled = !bypassRouter.enabled"
+                :class="bypassRouter.enabled ? 'bg-purple-500' : 'bg-slate-300 dark:bg-slate-600'"
+                class="relative inline-flex h-5 w-9 flex-shrink-0 rounded-full transition-colors duration-200 focus:outline-none"
+              >
+                <span :class="bypassRouter.enabled ? 'translate-x-4' : 'translate-x-0'" class="inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200"></span>
+              </button>
+            </div>
+          </div>
+
+          <div class="px-5 py-5 space-y-5">
+            <!-- Routing model -->
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">路由决策模型 <span class="text-slate-400 font-normal">（格式：provider/model-id）</span></label>
+              <div class="flex gap-2">
+                <select
+                  x-model="bypassRouter.routing_model"
+                  class="flex-1 px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 focus:ring-2 focus:ring-purple-500"
+                >
+                  <option value="">— 请选择路由模型 —</option>
+                  <template x-for="m in allModels" :key="m">
+                    <option :value="m" x-text="m"></option>
+                  </template>
+                </select>
+                <input
+                  type="text"
+                  x-model="bypassRouter.routing_model"
+                  placeholder="或手动输入 provider/model"
+                  class="flex-1 px-3 py-2 text-sm font-mono rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+              <p class="text-xs text-slate-400 mt-1">建议使用低成本快速模型（如 dashscope/qwen3.5-flash），路由本身会额外消耗少量 token。</p>
+            </div>
+
+            <!-- Routing rules -->
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">路由规则 <span class="text-slate-400 font-normal">（自然语言描述，将注入路由提示词）</span></label>
+              <textarea
+                x-model="bypassRouter.routing_rules"
+                rows="4"
+                placeholder="例如：&#10;- 代码生成任务优先选 dashscope/qwen3-coder-plus&#10;- 需要长文本或创意写作时选 moonshot/kimi-chat&#10;- 其他通用任务使用 dashscope/qwen3.5-plus"
+                class="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 focus:ring-2 focus:ring-purple-500 font-mono resize-y"
+              ></textarea>
+            </div>
+
+            <!-- Advanced settings row -->
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">路由超时 (ms)</label>
+                <input
+                  type="number"
+                  x-model.number="bypassRouter.timeout_ms"
+                  min="500" max="30000" step="500"
+                  class="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 focus:ring-2 focus:ring-purple-500"
+                />
+                <p class="text-xs text-slate-400 mt-1">超时后自动降级到场景路由</p>
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">上下文压缩阈值（消息数）</label>
+                <input
+                  type="number"
+                  x-model.number="bypassRouter.compress_context_threshold"
+                  min="2" max="200" step="1"
+                  class="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 focus:ring-2 focus:ring-purple-500"
+                />
+                <p class="text-xs text-slate-400 mt-1">超过此数量才允许路由器建议压缩上下文</p>
+              </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="flex items-center gap-3 pt-2 border-t border-slate-100 dark:border-slate-700">
+              <button @click="saveBypassRouter()" :disabled="loading"
+                class="px-5 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors">
+                💾 保存配置
+              </button>
+              <button @click="testBypassRouter()" :disabled="bypassRouterTesting || !bypassRouter.enabled"
+                class="px-5 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50 text-slate-700 dark:text-slate-300 text-sm font-semibold rounded-lg transition-colors flex items-center gap-2">
+                <span x-show="bypassRouterTesting" class="w-4 h-4 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></span>
+                🧪 测试路由
+              </button>
+              <span x-show="!bypassRouter.enabled" class="text-xs text-slate-400 italic">启用后才可测试</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Test result -->
+        <div x-show="bypassRouterTestResult" x-cloak
+          :class="bypassRouterTestResult?.ok ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20' : 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20'"
+          class="rounded-xl border p-4">
+          <template x-if="bypassRouterTestResult?.ok">
+            <div class="space-y-2">
+              <div class="flex items-center gap-2">
+                <span class="text-emerald-500 font-bold">✅</span>
+                <span class="text-sm font-semibold text-emerald-800 dark:text-emerald-300">路由测试成功</span>
+              </div>
+              <div class="text-xs text-slate-600 dark:text-slate-300 space-y-1">
+                <p>🎯 选中模型：<code class="font-mono bg-white dark:bg-slate-800 px-1.5 py-0.5 rounded" x-text="bypassRouterTestResult?.selected_model"></code></p>
+                <p>💬 决策理由：<span x-text="bypassRouterTestResult?.reason"></span></p>
+                <p x-show="bypassRouterTestResult?.context_compressed">✂️ 上下文已压缩（<span x-text="bypassRouterTestResult?.original_message_count"></span> → <span x-text="bypassRouterTestResult?.compressed_message_count"></span> 条消息）</p>
+              </div>
+            </div>
+          </template>
+          <template x-if="!bypassRouterTestResult?.ok">
+            <div class="flex items-start gap-2">
+              <span class="text-red-500">❌</span>
+              <div>
+                <p class="text-sm font-semibold text-red-700 dark:text-red-400">测试失败</p>
+                <p class="text-xs text-red-600 dark:text-red-300 mt-1" x-text="bypassRouterTestResult?.error"></p>
+              </div>
+            </div>
+          </template>
+        </div>
+
       </div>
 
       <!-- ── SAVINGS ── -->
@@ -827,6 +1043,70 @@
           </div>
         </div>
 
+        <!-- External API Keys -->
+        <div class="mt-4 bg-white dark:bg-slate-800 rounded-xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300">外部连接 API Keys</h3>
+              <p class="text-xs text-slate-400 mt-1">为外部客户端配置名称、模型权限和截止时间。</p>
+            </div>
+            <button @click="loadApiKeys()" class="text-xs px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600">刷新</button>
+          </div>
+
+          <form @submit.prevent="createApiKey()" class="grid grid-cols-1 lg:grid-cols-[180px_1fr_220px_90px] gap-2 mb-4">
+            <input x-model="newApiKey.name" type="text" placeholder="名称，如 openlaw"
+              class="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm" required />
+            <input x-model="newApiKey.models" type="text" placeholder="模型权限，逗号分隔；* 表示全部"
+              class="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm font-mono" />
+            <input x-model="newApiKey.expires" type="datetime-local"
+              class="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm" />
+            <button type="submit" :disabled="loading"
+              class="bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white font-semibold py-2 rounded-lg text-sm">创建</button>
+          </form>
+
+          <div x-show="newApiKey.createdToken" class="mb-4 rounded-lg border border-emerald-200 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/30 p-3">
+            <p class="text-xs text-emerald-700 dark:text-emerald-300 mb-1">请立即保存，明文 API Key 只显示这一次。</p>
+            <code class="text-sm font-mono break-all text-emerald-800 dark:text-emerald-200" x-text="newApiKey.createdToken"></code>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="text-xs text-slate-400 border-b border-slate-200 dark:border-slate-700">
+                <tr>
+                  <th class="text-left py-2">名称</th>
+                  <th class="text-left py-2">Key</th>
+                  <th class="text-left py-2">模型权限</th>
+                  <th class="text-left py-2">截止时间</th>
+                  <th class="text-right py-2">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="k in apiKeys" :key="k.id">
+                  <tr class="border-b border-slate-100 dark:border-slate-700/60">
+                    <td class="py-2">
+                      <input x-model="k.name" class="w-36 px-2 py-1 rounded border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-xs" />
+                    </td>
+                    <td class="py-2 font-mono text-xs" x-text="k.key_preview"></td>
+                    <td class="py-2">
+                      <input :value="(k.model_permissions || ['*']).join(',')" @input="k.model_permissions = $event.target.value.split(',').map(x => x.trim()).filter(Boolean)"
+                        class="w-64 px-2 py-1 rounded border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-xs font-mono" />
+                    </td>
+                    <td class="py-2">
+                      <input :value="toDateTimeLocal(k.expires_at)" @input="k.expires_at_iso = $event.target.value"
+                        type="datetime-local" class="px-2 py-1 rounded border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-xs" />
+                    </td>
+                    <td class="py-2 text-right">
+                      <button @click="updateApiKey(k)" class="text-xs px-2 py-1 rounded bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 mr-1">保存</button>
+                      <button @click="deleteApiKey(k.id)" class="text-xs px-2 py-1 rounded bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300">停用</button>
+                    </td>
+                  </tr>
+                </template>
+                <tr x-show="apiKeys.length === 0"><td colspan="5" class="py-4 text-center text-slate-400">暂无外部 API Key</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <!-- GitHub link card -->
         <div class="mt-4 bg-gradient-to-r from-slate-800 to-slate-700 dark:from-slate-700 dark:to-slate-600 rounded-xl p-5 border border-slate-600">
           <div class="flex items-center justify-between">
@@ -1043,6 +1323,178 @@
   </div>
 </div>
 
+<!-- ═══════════════════ BENCHMARK OFFER MODAL ═══════════════════ -->
+<div x-show="showBenchmarkOffer" x-cloak @click.self="showBenchmarkOffer = false"
+  class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+  <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md border border-slate-200 dark:border-slate-700">
+    <div class="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700">
+      <div class="flex items-center gap-2">
+        <span class="text-xl">🧪</span>
+        <h2 class="text-base font-semibold text-slate-900 dark:text-white">模型能力测试</h2>
+      </div>
+      <button @click="showBenchmarkOffer = false" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xl leading-none">✕</button>
+    </div>
+    <div class="px-6 py-5 space-y-4">
+      <!-- Provider info -->
+      <div class="flex items-center gap-3 p-3 bg-purple-50 dark:bg-purple-900/20 rounded-xl border border-purple-100 dark:border-purple-800">
+        <span class="text-2xl">🔌</span>
+        <div>
+          <p class="text-sm font-semibold text-slate-900 dark:text-white" x-text="benchmarkOfferData.providerName"></p>
+          <p class="text-xs text-slate-500 dark:text-slate-400" x-text="benchmarkOfferData.modelIds.length + ' 个模型待测试'"></p>
+        </div>
+      </div>
+      <!-- Dimension list -->
+      <div>
+        <p class="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">测试覆盖 5 个能力维度：</p>
+        <div class="flex flex-wrap gap-1.5">
+          <span class="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-xs text-slate-600 dark:text-slate-300">💻 代码编程</span>
+          <span class="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-xs text-slate-600 dark:text-slate-300">🔢 数学推理</span>
+          <span class="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-xs text-slate-600 dark:text-slate-300">✍️ 文学创作</span>
+          <span class="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-xs text-slate-600 dark:text-slate-300">🌐 语言翻译</span>
+          <span class="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-xs text-slate-600 dark:text-slate-300">💬 日常对话</span>
+        </div>
+      </div>
+      <!-- Cost estimates -->
+      <div class="grid grid-cols-3 gap-3">
+        <div class="text-center p-3 bg-slate-50 dark:bg-slate-700/50 rounded-xl">
+          <p class="text-lg font-bold text-slate-800 dark:text-slate-100" x-text="benchmarkOfferData.calls"></p>
+          <p class="text-xs text-slate-400 mt-0.5">API 调用次数</p>
+        </div>
+        <div class="text-center p-3 bg-slate-50 dark:bg-slate-700/50 rounded-xl">
+          <p class="text-lg font-bold text-slate-800 dark:text-slate-100" x-text="'~' + (benchmarkOfferData.tokens / 1000).toFixed(0) + 'K'"></p>
+          <p class="text-xs text-slate-400 mt-0.5">Token 消耗</p>
+        </div>
+        <div class="text-center p-3 bg-slate-50 dark:bg-slate-700/50 rounded-xl">
+          <p class="text-lg font-bold text-slate-800 dark:text-slate-100" x-text="'~' + benchmarkOfferData.minutes + ' 分钟'"></p>
+          <p class="text-xs text-slate-400 mt-0.5">预计耗时</p>
+        </div>
+      </div>
+      <!-- Warning -->
+      <div class="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
+        <span class="text-amber-500 flex-shrink-0 mt-0.5">⚠️</span>
+        <p class="text-xs text-amber-700 dark:text-amber-300">测试将向各模型发起真实 API 请求，会消耗您的 API 配额。每题约 500–1000 tokens，实际费用取决于各平台定价。</p>
+      </div>
+      <!-- Buttons -->
+      <div class="flex gap-3 pt-1">
+        <button @click="showBenchmarkOffer = false"
+          class="flex-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 font-semibold py-2 rounded-lg text-sm transition-colors">
+          暂时跳过
+        </button>
+        <button @click="startBenchmark()"
+          class="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 rounded-lg text-sm transition-colors flex items-center justify-center gap-2">
+          🚀 开始测试
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ BENCHMARK PROGRESS MODAL ═══════════════════ -->
+<div x-show="showBenchmarkModal" x-cloak
+  class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+  <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl border border-slate-200 dark:border-slate-700 max-h-[85vh] flex flex-col">
+    <!-- Header -->
+    <div class="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">
+      <div class="flex items-center gap-2">
+        <span class="text-xl" x-text="benchmarkStatus?.status === 'done' ? '✅' : benchmarkStatus?.status === 'error' ? '❌' : '🧪'"></span>
+        <h2 class="text-base font-semibold text-slate-900 dark:text-white"
+          x-text="benchmarkStatus?.status === 'done' ? '测试完成' : benchmarkStatus?.status === 'error' ? '测试出错' : '测试进行中…'">
+        </h2>
+      </div>
+      <button x-show="benchmarkStatus?.status === 'done' || benchmarkStatus?.status === 'error'"
+        @click="closeBenchmarkModal()"
+        class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xl leading-none">✕</button>
+    </div>
+
+    <!-- Body -->
+    <div class="px-6 py-5 overflow-y-auto flex-1 space-y-4">
+
+      <!-- Running state -->
+      <div x-show="benchmarkStatus?.status === 'running' || benchmarkStatus?.status === 'pending'">
+        <!-- Progress bar -->
+        <div class="mb-3">
+          <div class="flex items-center justify-between text-xs text-slate-500 mb-1.5">
+            <span x-text="benchmarkStatus?.current_step || '准备中…'" class="truncate max-w-xs"></span>
+            <span x-text="(benchmarkStatus?.progress || 0) + '%'" class="font-mono flex-shrink-0 ml-2"></span>
+          </div>
+          <div class="w-full h-2.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+            <div class="h-full bg-purple-500 rounded-full transition-all duration-500"
+              :style="'width:' + (benchmarkStatus?.progress || 0) + '%'"></div>
+          </div>
+        </div>
+        <p class="text-xs text-slate-400 text-center">测试在后台运行，关闭此窗口不会中断测试</p>
+        <!-- Animated dots -->
+        <div class="flex justify-center gap-1.5 mt-3">
+          <span class="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style="animation-delay:0ms"></span>
+          <span class="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style="animation-delay:150ms"></span>
+          <span class="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style="animation-delay:300ms"></span>
+        </div>
+      </div>
+
+      <!-- Error state -->
+      <div x-show="benchmarkStatus?.status === 'error'"
+        class="flex items-start gap-3 p-4 bg-red-50 dark:bg-red-900/20 rounded-xl border border-red-200 dark:border-red-800">
+        <span class="text-red-500 text-xl flex-shrink-0">❌</span>
+        <div>
+          <p class="text-sm font-semibold text-red-700 dark:text-red-400">测试失败</p>
+          <p class="text-xs text-red-600 dark:text-red-300 mt-1" x-text="benchmarkStatus?.error || '未知错误'"></p>
+        </div>
+      </div>
+
+      <!-- Done state: results table -->
+      <div x-show="benchmarkStatus?.status === 'done' && benchmarkStatus?.results">
+        <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">以下为各模型在 5 个维度的能力得分（0–100），★ 越多越好：</p>
+        <div class="overflow-x-auto">
+          <table class="w-full text-xs">
+            <thead>
+              <tr class="text-slate-400 border-b border-slate-200 dark:border-slate-700">
+                <th class="text-left pb-2 font-medium pr-4">模型</th>
+                <th class="text-center pb-2 font-medium px-2">💻 代码</th>
+                <th class="text-center pb-2 font-medium px-2">🔢 数学</th>
+                <th class="text-center pb-2 font-medium px-2">✍️ 写作</th>
+                <th class="text-center pb-2 font-medium px-2">🌐 翻译</th>
+                <th class="text-center pb-2 font-medium px-2">💬 对话</th>
+                <th class="text-center pb-2 font-medium px-2">综合</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="[modelKey, dimResults] in Object.entries(benchmarkStatus.results || {})" :key="modelKey">
+                <tr class="border-b border-slate-100 dark:border-slate-700/50 last:border-0">
+                  <td class="py-2 pr-4 font-mono text-slate-700 dark:text-slate-300 text-xs" x-text="modelKey"></td>
+                  <template x-for="dim in ['coding','math','writing','translation','chat']" :key="dim">
+                    <td class="py-2 px-2 text-center">
+                      <span x-show="dimResults[dim]" class="text-amber-500 font-mono text-xs" x-text="dimResults[dim]?.stars || ''"></span>
+                      <span x-show="!dimResults[dim]" class="text-slate-300 dark:text-slate-600 text-xs">—</span>
+                    </td>
+                  </template>
+                  <td class="py-2 px-2 text-center">
+                    <span
+                      :class="(() => { const dims=['coding','math','writing','translation','chat']; const scores=dims.map(d=>dimResults[d]?.score||0); const avg=Math.round(scores.reduce((a,b)=>a+b,0)/scores.length); return avg>=70?'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400':avg>=50?'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400':'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'; })()"
+                      class="inline-block px-1.5 py-0.5 rounded text-xs font-bold"
+                      x-text="(() => { const dims=['coding','math','writing','translation','chat']; const scores=dims.map(d=>dimResults[d]?.score||0); return Math.round(scores.reduce((a,b)=>a+b,0)/scores.length); })()">
+                    </span>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+        <p class="mt-3 text-xs text-slate-400">详细结果已保存至 <code class="font-mono bg-slate-100 dark:bg-slate-700 px-1 rounded">~/.bridge-server/benchmark_results.yaml</code></p>
+      </div>
+
+    </div>
+
+    <!-- Footer -->
+    <div x-show="benchmarkStatus?.status === 'done' || benchmarkStatus?.status === 'error'"
+      class="px-6 py-4 border-t border-slate-200 dark:border-slate-700 flex-shrink-0">
+      <button @click="closeBenchmarkModal()"
+        class="w-full bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 font-semibold py-2 rounded-lg text-sm transition-colors">
+        关闭
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══════════════════ TOAST ═══════════════════ -->
 <div x-show="toast" x-cloak x-transition:enter="transition ease-out duration-200" x-transition:enter-start="translate-y-2 opacity-0" x-transition:enter-end="translate-y-0 opacity-100"
   x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
@@ -1089,6 +1541,7 @@ function app() {
       { id: 'dashboard', label: '仪表盘', icon: '📊' },
       { id: 'providers', label: 'Providers', icon: '🔌' },
       { id: 'routing', label: '路由配置', icon: '🔀' },
+      { id: 'bypass-router', label: '旁路路由器', icon: '🧠' },
       { id: 'usage', label: '用量统计', icon: '📈' },
       { id: 'savings', label: '降本看板', icon: '💰' },
       { id: 'logs', label: '日志', icon: '📋' },
@@ -1108,6 +1561,7 @@ function app() {
     updates: null,
     logs: [],
     logLines: '100',
+    apiKeys: [],
     providers: [],
     routing: null,
     routingStrategy: 'fallback',
@@ -1123,6 +1577,21 @@ function app() {
     showEditProvider: false,
     editTarget: '',
     editProvider: { api_key: '', auth_type: 'api_key', oauth_token_url: '', oauth_client_id: '', oauth_client_secret: '', oauth_scope: '', modelList: [] },
+    // Benchmark state
+    showBenchmarkOffer: false,
+    benchmarkOfferData: { providerName: '', modelIds: [], calls: 0, tokens: 0, minutes: 0 },
+    showBenchmarkModal: false,
+    benchmarkTaskId: null,
+    benchmarkStatus: null,
+    benchmarkSavedResults: null,
+    _benchmarkPollTimer: null,
+    // External API key management state
+    newApiKey: { name: '', models: '*', expires: '', createdToken: '' },
+    // Bypass router state
+    bypassRouter: { enabled: false, routing_model: '', routing_rules: '', timeout_ms: 3000, compress_context_threshold: 10 },
+    bypassRouterTestResult: null,
+    bypassRouterTesting: false,
+    activeCustomRouter: null,   // name of active code-plugin router, or null
 
     async init() {
       // Apply dark mode class
@@ -1184,19 +1653,20 @@ function app() {
     async navigate(p) {
       this.page = p;
       if (p === 'dashboard') await Promise.all([this.loadStatus(), this.loadUsage()]);
-      else if (p === 'providers') await Promise.all([this.loadConfig(), this.loadStatus()]);
-      else if (p === 'routing') await Promise.all([this.loadConfig(), this.loadRouting()]);
+      else if (p === 'providers') await Promise.all([this.loadConfig(), this.loadStatus(), this.loadBenchmarkResults()]);
+      else if (p === 'routing') await Promise.all([this.loadConfig(), this.loadRouting(), this.loadBypassRouter()]);
+      else if (p === 'bypass-router') await this.loadBypassRouter();
       else if (p === 'usage') { await this.loadUsage(); this.$nextTick(() => this.renderChart()); }
       else if (p === 'savings') { await Promise.all([this.loadSavingsOverview(), this.loadSavings(), this.loadSavingsConfig()]); this.$nextTick(() => this.renderSavingsChart()); }
       else if (p === 'logs') await this.loadLogs();
-      else if (p === 'system') await Promise.all([this.loadConfig(), this.loadUpdates()]);
+      else if (p === 'system') await Promise.all([this.loadConfig(), this.loadUpdates(), this.loadApiKeys()]);
     },
 
     async refreshAll() {
       await Promise.all([this.loadStatus(), this.loadUsage(), this.loadConfig()]);
       if (this.page === 'routing') await this.loadRouting();
       if (this.page === 'logs') await this.loadLogs();
-      if (this.page === 'system') await this.loadUpdates();
+      if (this.page === 'system') await Promise.all([this.loadUpdates(), this.loadApiKeys()]);
       if (this.page === 'usage') this.$nextTick(() => this.renderChart());
       if (this.page === 'savings') { await Promise.all([this.loadSavingsOverview(), this.loadSavings(), this.loadSavingsConfig()]); this.$nextTick(() => this.renderSavingsChart()); }
     },
@@ -1266,6 +1736,85 @@ function app() {
       } catch (e) { console.warn('loadUpdates:', e); }
     },
 
+    async loadApiKeys() {
+      try {
+        const res = await this.api('/api/admin/api-keys');
+        if (res.ok) {
+          const data = await res.json();
+          this.apiKeys = data.api_keys || [];
+        }
+      } catch (e) { console.warn('loadApiKeys:', e); }
+    },
+
+    toDateTimeLocal(ts) {
+      if (!ts) return '';
+      const d = new Date(ts * 1000);
+      const pad = n => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    },
+
+    async createApiKey() {
+      const models = (this.newApiKey.models || '*').split(',').map(x => x.trim()).filter(Boolean);
+      const body = { name: this.newApiKey.name, model_permissions: models.length ? models : ['*'] };
+      if (this.newApiKey.expires) body.expires_at_iso = this.newApiKey.expires;
+      this.loading = true;
+      try {
+        const res = await this.api('/api/admin/api-keys', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          this.newApiKey.createdToken = data.api_key.token;
+          this.newApiKey.name = '';
+          this.newApiKey.models = '*';
+          this.newApiKey.expires = '';
+          await this.loadApiKeys();
+          this.showToast('API Key 已创建');
+        } else {
+          const err = await res.json().catch(() => ({}));
+          this.showToast(err.detail || '创建失败', 'error');
+        }
+      } catch (e) { this.showToast('操作失败: ' + e.message, 'error'); }
+      finally { this.loading = false; }
+    },
+
+    async updateApiKey(k) {
+      const body = {
+        name: k.name,
+        model_permissions: k.model_permissions || ['*'],
+      };
+      if (k.expires_at_iso !== undefined) {
+        if (k.expires_at_iso) body.expires_at_iso = k.expires_at_iso;
+        else body.clear_expires_at = true;
+      }
+      try {
+        const res = await this.api('/api/admin/api-keys/' + encodeURIComponent(k.id), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (res.ok) { await this.loadApiKeys(); this.showToast('API Key 已更新'); }
+        else {
+          const err = await res.json().catch(() => ({}));
+          this.showToast(err.detail || '更新失败', 'error');
+        }
+      } catch (e) { this.showToast('操作失败: ' + e.message, 'error'); }
+    },
+
+    async deleteApiKey(id) {
+      if (!confirm('确认停用这个 API Key？')) return;
+      try {
+        const res = await this.api('/api/admin/api-keys/' + encodeURIComponent(id), { method: 'DELETE' });
+        if (res.ok) { await this.loadApiKeys(); this.showToast('API Key 已停用'); }
+        else {
+          const err = await res.json().catch(() => ({}));
+          this.showToast(err.detail || '停用失败', 'error');
+        }
+      } catch (e) { this.showToast('操作失败: ' + e.message, 'error'); }
+    },
+
     async loadLogs() {
       try {
         const res = await this.api('/api/admin/logs?n=' + this.logLines);
@@ -1318,10 +1867,14 @@ function app() {
           body: JSON.stringify(body),
         });
         if (res.ok) {
+          const addedName = this.newProvider.name;
+          const addedModelIds = models.map(r => r.id.trim());
           this.showAddProvider = false;
           this.newProvider = { name: '', base_url: '', api_key: '', auth_type: 'api_key', oauth_token_url: '', oauth_client_id: '', oauth_client_secret: '', oauth_scope: '', modelList: [{id: '', input_cost: 0, output_cost: 0}] };
           await this.loadConfig();
           this.showToast('Provider 添加成功！');
+          // Offer benchmark after a short delay so the toast is visible
+          setTimeout(() => this.promptBenchmark(addedName, addedModelIds), 600);
         } else {
           const err = await res.json().catch(() => ({}));
           this.showToast(err.detail || '添加失败', 'error');
@@ -1460,10 +2013,157 @@ function app() {
       this.routingScenarios = s;
     },
 
+    // ── Bypass Router ──────────────────────────────────────────────────────
+
+    async loadBypassRouter() {
+      try {
+        const [brRes, arRes] = await Promise.all([
+          this.api('/api/admin/bypass-router'),
+          this.api('/api/admin/router/active').catch(() => null),
+        ]);
+        if (brRes.ok) this.bypassRouter = await brRes.json();
+        if (arRes && arRes.ok) {
+          const arData = await arRes.json();
+          this.activeCustomRouter = arData.active || null;
+        }
+      } catch (e) { console.warn('loadBypassRouter:', e); }
+    },
+
+    async saveBypassRouter() {
+      this.loading = true;
+      try {
+        const res = await this.api('/api/admin/bypass-router', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.bypassRouter),
+        });
+        if (res.ok) this.showToast('旁路路由器配置已保存');
+        else {
+          const err = await res.json().catch(() => ({}));
+          this.showToast(err.detail || '保存失败', 'error');
+        }
+      } catch (e) {
+        this.showToast('操作失败: ' + e.message, 'error');
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    async testBypassRouter() {
+      this.bypassRouterTesting = true;
+      this.bypassRouterTestResult = null;
+      try {
+        const res = await this.api('/api/admin/bypass-router/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages: [{ role: 'user', content: '帮我写一个 Python 快速排序算法' }] }),
+        });
+        this.bypassRouterTestResult = await res.json();
+      } catch (e) {
+        this.bypassRouterTestResult = { ok: false, error: e.message };
+      } finally {
+        this.bypassRouterTesting = false;
+      }
+    },
+
     showToast(msg, type = 'success') {
       this.toast = msg;
       this.toastType = type;
       setTimeout(() => { this.toast = ''; }, 3500);
+    },
+
+    // ── Benchmark ──────────────────────────────────────────────────────────
+
+    promptBenchmark(providerName, modelIds) {
+      const dims = 5;
+      const calls = modelIds.length * dims * 3;
+      const tokens = calls * 750;
+      const minutes = Math.ceil(calls * 6 / 60);
+      this.benchmarkOfferData = { providerName, modelIds, calls, tokens, minutes };
+      this.showBenchmarkOffer = true;
+    },
+
+    async startBenchmark() {
+      this.showBenchmarkOffer = false;
+      this.showBenchmarkModal = true;
+      this.benchmarkStatus = { status: 'pending', progress: 0, current_step: '正在启动…', results: null, error: null };
+      try {
+        const res = await this.api('/api/admin/benchmark/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            provider_name: this.benchmarkOfferData.providerName,
+            model_ids: this.benchmarkOfferData.modelIds,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          this.benchmarkTaskId = data.task_id;
+          this._pollBenchmark();
+        } else {
+          const err = await res.json().catch(() => ({}));
+          this.benchmarkStatus = { status: 'error', progress: 0, current_step: '', error: err.detail || '启动失败' };
+        }
+      } catch (e) {
+        this.benchmarkStatus = { status: 'error', progress: 0, current_step: '', error: e.message };
+      }
+    },
+
+    _pollBenchmark() {
+      if (!this.benchmarkTaskId) return;
+      const poll = async () => {
+        try {
+          const res = await this.api('/api/admin/benchmark/status/' + this.benchmarkTaskId);
+          if (res.ok) {
+            this.benchmarkStatus = await res.json();
+            if (this.benchmarkStatus.status === 'done') {
+              await this.loadBenchmarkResults();
+              return;
+            }
+            if (this.benchmarkStatus.status === 'error') return;
+          }
+        } catch (e) { /* ignore poll errors */ }
+        this._benchmarkPollTimer = setTimeout(poll, 2000);
+      };
+      this._benchmarkPollTimer = setTimeout(poll, 1500);
+    },
+
+    closeBenchmarkModal() {
+      if (this._benchmarkPollTimer) clearTimeout(this._benchmarkPollTimer);
+      this._benchmarkPollTimer = null;
+      this.showBenchmarkModal = false;
+      this.benchmarkTaskId = null;
+      this.benchmarkStatus = null;
+    },
+
+    async loadBenchmarkResults() {
+      try {
+        const res = await this.api('/api/admin/benchmark/results');
+        if (res.ok) this.benchmarkSavedResults = await res.json();
+      } catch (e) { console.warn('loadBenchmarkResults:', e); }
+    },
+
+    getBenchmarkScore(providerName, modelId, dim) {
+      const key = providerName + '/' + modelId;
+      return this.benchmarkSavedResults?.results?.[key]?.[dim] || null;
+    },
+
+    getModelOverallScore(providerName, modelId) {
+      const key = providerName + '/' + modelId;
+      const modelResults = this.benchmarkSavedResults?.results?.[key];
+      if (!modelResults) return null;
+      const scores = Object.values(modelResults).map(d => d.score || 0);
+      if (!scores.length) return null;
+      return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+    },
+
+    benchmarkDimKeys() {
+      return ['coding', 'math', 'writing', 'translation', 'chat'];
+    },
+
+    benchmarkDimLabel(dim) {
+      const labels = { coding: '💻 代码', math: '🔢 数学', writing: '✍️ 写作', translation: '🌐 翻译', chat: '💬 对话' };
+      return labels[dim] || dim;
     },
 
     formatTs(ts) {

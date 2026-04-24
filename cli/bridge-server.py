@@ -509,6 +509,95 @@ def cmd_panel_token(reset: bool = False):
     print(f"  Panel Token：{Colors.GREEN}{token}{Colors.ENDC}")
     print()
 
+
+def _parse_cli_value(prefix: str, default=None):
+    for arg in sys.argv:
+        if arg.startswith(prefix + "="):
+            return arg.split("=", 1)[1]
+    return default
+
+
+def cmd_api_key(args):
+    """管理外部连接 API Keys。"""
+    sub = args[0].lower() if args else "list"
+    try:
+        if sub == "list":
+            resp = _admin_api("GET", "/api-keys")
+            resp.raise_for_status()
+            keys = resp.json().get("api_keys", [])
+            print(f"\n{Colors.BOLD}外部连接 API Keys{Colors.ENDC}\n")
+            if not keys:
+                print_info("暂无 API Key")
+                return
+            for item in keys:
+                expires = item.get("expires_at_iso") or "永不过期"
+                active = f"{Colors.GREEN}启用{Colors.ENDC}" if item.get("active") else f"{Colors.RED}停用{Colors.ENDC}"
+                models = ", ".join(item.get("model_permissions") or ["*"])
+                print(f"  {item['id']}  {Colors.BOLD}{item['name']}{Colors.ENDC}  {active}")
+                print(f"      Key: {item.get('key_preview', 'sk-****')}  截止: {expires}")
+                print(f"      模型权限: {models}")
+            print()
+            return
+
+        if sub == "create":
+            if len(args) < 2:
+                print_error("用法: bridge-server api-key create <名称> [--models=a,b] [--expires=YYYY-MM-DDTHH:MM:SS]")
+                return
+            name = args[1]
+            models = _parse_cli_value("--models", "*")
+            expires = _parse_cli_value("--expires", None)
+            body = {
+                "name": name,
+                "model_permissions": [m.strip() for m in models.split(",") if m.strip()],
+            }
+            if expires:
+                body["expires_at_iso"] = expires
+            resp = _admin_api("POST", "/api-keys", json_data=body)
+            resp.raise_for_status()
+            item = resp.json()["api_key"]
+            print_success(f"已创建 API Key: {item['name']}")
+            print_warning("请立即保存，明文 Key 只显示这一次。")
+            print(f"\n  API Key: {Colors.GREEN}{item['token']}{Colors.ENDC}\n")
+            return
+
+        if sub == "update":
+            if len(args) < 2:
+                print_error("用法: bridge-server api-key update <id> [--name=新名称] [--models=a,b] [--expires=YYYY-MM-DDTHH:MM:SS] [--clear-expires] [--active=true|false]")
+                return
+            key_id = args[1]
+            body = {}
+            name = _parse_cli_value("--name", None)
+            models = _parse_cli_value("--models", None)
+            expires = _parse_cli_value("--expires", None)
+            active = _parse_cli_value("--active", None)
+            if name is not None:
+                body["name"] = name
+            if models is not None:
+                body["model_permissions"] = [m.strip() for m in models.split(",") if m.strip()]
+            if expires is not None:
+                body["expires_at_iso"] = expires
+            if "--clear-expires" in sys.argv:
+                body["clear_expires_at"] = True
+            if active is not None:
+                body["active"] = active.lower() in ("1", "true", "yes", "y", "on")
+            resp = _admin_api("PUT", f"/api-keys/{key_id}", json_data=body)
+            resp.raise_for_status()
+            print_success("API Key 已更新")
+            return
+
+        if sub in ("delete", "revoke"):
+            if len(args) < 2:
+                print_error("用法: bridge-server api-key delete <id>")
+                return
+            resp = _admin_api("DELETE", f"/api-keys/{args[1]}")
+            resp.raise_for_status()
+            print_success("API Key 已停用")
+            return
+
+        print_error(f"未知 api-key 子命令: {sub}  (可用: list, create, update, delete)")
+    except Exception as e:
+        print_error(str(e))
+
 def cmd_route_test(text: str):
     """测试路由"""
     print(f"\n{Colors.BOLD}路由测试{Colors.ENDC}\n")
@@ -792,6 +881,143 @@ def cmd_reload():
         print_error(str(e))
 
 
+# ============ 自定义路由器管理 ============
+
+def cmd_router(args):
+    """自定义路由器管理"""
+    sub = args[0].lower() if args else "list"
+
+    if sub == "list":
+        try:
+            resp = _admin_api("GET", "/router/list")
+            resp.raise_for_status()
+            data = resp.json()
+            active = data.get("active")
+            routers = data.get("routers", [])
+            print(f"\n{Colors.BOLD}自定义路由器列表{Colors.ENDC}\n")
+            if not routers:
+                print_info("未安装任何自定义路由器")
+            else:
+                for r in routers:
+                    mark = f"{Colors.GREEN}● 激活{Colors.ENDC}" if r.get("active") else f"{Colors.YELLOW}○ 未激活{Colors.ENDC}"
+                    print(f"  {mark}  {Colors.BOLD}{r['name']}{Colors.ENDC}  v{r.get('version','?')}")
+                    if r.get("description"):
+                        print(f"         {r['description']}")
+            if active:
+                print(f"\n  当前激活: {Colors.GREEN}{active}{Colors.ENDC}")
+            else:
+                print(f"\n  当前使用: {Colors.CYAN}内置 SmartRouter{Colors.ENDC}")
+            print()
+        except Exception as e:
+            print_error(str(e))
+
+    elif sub == "import":
+        if not args[1:]:
+            print_error("用法: bridge-server router import <路径>  (目录或 .bspkg 文件)")
+            sys.exit(1)
+        path = " ".join(args[1:])
+        try:
+            resp = _admin_api("POST", "/router/import", json_data={"path": path})
+            resp.raise_for_status()
+            data = resp.json()
+            print_success(f"路由器 '{data['name']}' v{data['version']} 安装成功")
+            if data.get("description"):
+                print_info(data["description"])
+            print_info(f"激活命令: bridge-server router activate {data['name']}")
+        except Exception as e:
+            resp_data = {}
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    resp_data = e.response.json()
+                except Exception:
+                    pass
+            print_error(resp_data.get("detail") or str(e))
+
+    elif sub == "activate":
+        if not args[1:]:
+            print_error("用法: bridge-server router activate <路由器名>")
+            sys.exit(1)
+        name = args[1]
+        try:
+            resp = _admin_api("PUT", "/router/activate", json_data={"name": name})
+            resp.raise_for_status()
+            print_success(f"路由器 '{name}' 已激活，后续请求将使用自定义路由")
+        except Exception as e:
+            print_error(str(e))
+
+    elif sub == "deactivate":
+        try:
+            resp = _admin_api("POST", "/router/deactivate")
+            resp.raise_for_status()
+            print_success("自定义路由器已停用，回退到内置 SmartRouter")
+        except Exception as e:
+            print_error(str(e))
+
+    elif sub == "rollback":
+        name = args[1] if args[1:] else None
+        if not name:
+            # rollback active router
+            try:
+                resp = _admin_api("GET", "/router/active")
+                name = resp.json().get("active")
+            except Exception:
+                pass
+        if not name:
+            print_error("用法: bridge-server router rollback <路由器名>")
+            sys.exit(1)
+        try:
+            resp = _admin_api("POST", f"/router/rollback/{name}")
+            resp.raise_for_status()
+            print_success(resp.json().get("message", f"'{name}' 已回滚"))
+        except Exception as e:
+            print_error(str(e))
+
+    elif sub == "remove":
+        if not args[1:]:
+            print_error("用法: bridge-server router remove <路由器名>")
+            sys.exit(1)
+        name = args[1]
+        try:
+            resp = _admin_api("DELETE", f"/router/{name}")
+            resp.raise_for_status()
+            print_success(f"路由器 '{name}' 已卸载")
+        except Exception as e:
+            print_error(str(e))
+
+    elif sub == "test":
+        name = args[1] if args[1:] else None
+        if not name:
+            # test active router
+            try:
+                resp = _admin_api("GET", "/router/active")
+                name = resp.json().get("active")
+            except Exception:
+                pass
+        if not name:
+            print_error("用法: bridge-server router test <路由器名> [消息]")
+            sys.exit(1)
+        message = " ".join(args[2:]) if args[2:] else "帮我写一个快速排序算法"
+        try:
+            resp = _admin_api("POST", "/router/test", json_data={"name": name, "message": message})
+            resp.raise_for_status()
+            result = resp.json()
+            if result.get("success"):
+                d = result["decision"]
+                print_success(f"路由成功  ({result['elapsed_ms']}ms)")
+                print(f"  Provider: {Colors.BOLD}{d['provider']}{Colors.ENDC}")
+                print(f"  Model:    {Colors.CYAN}{d['model']}{Colors.ENDC}")
+                print(f"  置信度:   {d['confidence']:.2f}")
+                print(f"  原因:     {d['reason']}")
+            else:
+                print_error(f"路由失败: {result.get('error')}")
+        except Exception as e:
+            print_error(str(e))
+
+    else:
+        print_error(f"未知 router 子命令: {sub}")
+        print("  可用子命令: list, import, activate, deactivate, rollback, remove, test")
+
+
 def print_help():
     """显示帮助"""
     help_text = f"""
@@ -832,6 +1058,16 @@ def print_help():
     setup           运行配置向导
     benchmark       模型能力基准测试
     panel-token     显示/生成管理面板 Token（--reset 重新生成）
+    api-key        管理外部连接 API Keys
+
+  自定义路由器（需要 Panel Token）:
+    router list                       列出所有已安装路由器
+    router import <路径>               安装路由器（目录或 .bspkg 文件）
+    router activate <名称>             激活指定路由器
+    router deactivate                  停用，回退到内置 SmartRouter
+    router rollback [名称]             回滚到上一个版本
+    router remove <名称>               卸载路由器
+    router test [名称] [消息]          测试路由器路由决策
 
   其他:
     help            显示帮助
@@ -843,8 +1079,14 @@ def print_help():
   bridge-server scenario set coding my-provider/gpt-4o-mini
   bridge-server reload
   bridge-server panel-token
+  bridge-server api-key list
+  bridge-server api-key create app-a --models=scnet/Qwen3-235B-A22B,scnet/MiniMax-M2.5 --expires=2026-05-01T00:00:00
   bridge-server logs 100
   bridge-server route-test "用 Python 写个快速排序"
+  bridge-server router import ./my-router
+  bridge-server router activate my-router
+  bridge-server router test my-router "写个快速排序"
+  bridge-server router deactivate
 """
     print(help_text)
 
@@ -898,6 +1140,8 @@ def main():
     elif command == "panel-token":
         reset = "--reset" in sys.argv
         cmd_panel_token(reset)
+    elif command == "api-key":
+        cmd_api_key(sys.argv[2:])
     elif command == "benchmark":
         cmd_benchmark()
     elif command == "route-test":
@@ -931,6 +1175,8 @@ def main():
             cmd_scenario_set(sys.argv[3], sys.argv[4])
         else:
             print_error(f"未知 scenario 子命令: {sub}  (可用: list, set)")
+    elif command == "router":
+        cmd_router(sys.argv[2:])
     elif command == "login":
         username = sys.argv[2] if len(sys.argv) > 2 else "admin"
         password = sys.argv[3] if len(sys.argv) > 3 else ""

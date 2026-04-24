@@ -6,14 +6,72 @@ Provider 抽象基类 - Bridge Server v2.0
 
 import asyncio
 import httpx
-import logging
+import json
+import re
 import time
+import uuid
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, AsyncGenerator
 from dataclasses import dataclass
 from enum import Enum
 
-logger = logging.getLogger(__name__)
+from ..observability.logging import get_logger
+
+logger = get_logger(__name__)
+
+_OPENAI_EXTRA_PAYLOAD_KEYS = (
+    "tools",
+    "tool_choice",
+    "parallel_tool_calls",
+    "stop",
+    "response_format",
+    "presence_penalty",
+    "frequency_penalty",
+    "seed",
+    "n",
+)
+
+_TAGGED_TOOL_CALL_RE = re.compile(
+    r"<(?:[\w.-]+:)?tool_call>\s*(.*?)\s*</(?:[\w.-]+:)?tool_call>",
+    re.IGNORECASE | re.DOTALL,
+)
+_INVOKE_RE = re.compile(
+    r"<invoke\s+name=\"([^\"]+)\"\s*>(.*?)</invoke>",
+    re.IGNORECASE | re.DOTALL,
+)
+_PARAM_RE = re.compile(
+    r"<parameter\s+name=\"([^\"]+)\"\s*>(.*?)</parameter>",
+    re.IGNORECASE | re.DOTALL,
+)
+_TOOL_TAG_RE = re.compile(
+    r"<tool\s+name=\"([^\"]+)\"\s*>(.*?)</tool>",
+    re.IGNORECASE | re.DOTALL,
+)
+_TOOL_TAG_PARAM_RE = re.compile(
+    r"<param\s+name=\"([^\"]+)\"\s*>(.*?)</param>",
+    re.IGNORECASE | re.DOTALL,
+)
+_TOOL_CODE_RE = re.compile(
+    r"<tool_code>\s*(.*?)\s*</tool_code>",
+    re.IGNORECASE | re.DOTALL,
+)
+_TOOL_CODE_NAME_RE = re.compile(
+    r"tool\s*=>\s*['\"]([^'\"]+)['\"]",
+    re.IGNORECASE,
+)
+_TOOL_CODE_ARGS_RE = re.compile(
+    r"args\s*=>\s*['\"](.*?)['\"]",
+    re.IGNORECASE | re.DOTALL,
+)
+_SIMPLE_XML_ARG_RE = re.compile(
+    r"<([a-zA-Z0-9_:-]+)>\s*(.*?)\s*</\1>",
+    re.DOTALL,
+)
+_STREAM_TOOL_CALL_START_MARKERS = (
+    "<minimax:tool_call",
+    "<tool_call",
+    "<tool_code",
+)
 
 
 class ProviderStatus(Enum):
@@ -136,6 +194,413 @@ class BaseProvider(ABC):
             except Exception as e:
                 logger.error(f"OAuth token 获取失败 | Provider: {self.provider_id} | {e}")
                 raise
+
+    def _format_openai_compatible_messages(self, messages: list) -> list:
+        """Preserve OpenAI-compatible tool metadata instead of flattening to role/content only."""
+        formatted = []
+        for msg in messages:
+            if not isinstance(msg, dict):
+                continue
+            role = msg.get("role")
+            if not role:
+                continue
+
+            entry: Dict[str, Any] = {"role": role}
+            if "content" in msg:
+                entry["content"] = msg.get("content")
+            elif role != "assistant":
+                entry["content"] = None
+
+            for key in ("name", "tool_calls", "tool_call_id"):
+                if key in msg and msg.get(key) is not None:
+                    entry[key] = msg.get(key)
+
+            if role == "assistant" and "content" not in entry and "tool_calls" not in entry:
+                continue
+
+            formatted.append(entry)
+        return formatted
+
+    def _build_openai_compatible_payload(
+        self,
+        *,
+        model: str,
+        messages: list,
+        stream: bool,
+        default_max_tokens: int,
+        default_temperature: float,
+        default_top_p: float,
+        kwargs: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "model": model,
+            "messages": self._format_openai_compatible_messages(messages),
+            "stream": stream,
+            "max_tokens": kwargs.get("max_tokens", default_max_tokens),
+            "temperature": kwargs.get("temperature", default_temperature),
+            "top_p": kwargs.get("top_p", default_top_p),
+        }
+
+        for key in _OPENAI_EXTRA_PAYLOAD_KEYS:
+            if key in kwargs:
+                payload[key] = kwargs.get(key)
+
+        stream_options = kwargs.get("stream_options")
+        if stream and stream_options:
+            payload["stream_options"] = stream_options
+
+        return {k: v for k, v in payload.items() if v is not None}
+
+    @staticmethod
+    def _make_tool_call_id() -> str:
+        return f"call_{uuid.uuid4().hex[:24]}"
+
+    @staticmethod
+    def _extract_tool_code_arguments(raw_args: str) -> Dict[str, Any]:
+        xml_matches = _SIMPLE_XML_ARG_RE.findall(raw_args or "")
+        if xml_matches:
+            return {name.strip(): value.strip() for name, value in xml_matches if name.strip()}
+
+        stripped = (raw_args or "").strip()
+        if not stripped:
+            return {}
+
+        try:
+            parsed = json.loads(stripped)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+
+        return {"input": stripped}
+
+    @staticmethod
+    def _preview_text(value: Any, limit: int = 180) -> Optional[str]:
+        if value is None:
+            return None
+        text = str(value).replace("\n", "\\n")
+        if len(text) <= limit:
+            return text
+        return text[:limit] + "..."
+
+    @staticmethod
+    def _extract_structure_flags(content: Any) -> list[str]:
+        if not isinstance(content, str):
+            return []
+        lowered = content.lower()
+        flags = []
+        if "<minimax:tool_call" in lowered:
+            flags.append("minimax_tool_call")
+        if "<tool_call" in lowered:
+            flags.append("tool_call_tag")
+        if "<invoke " in lowered:
+            flags.append("invoke_tag")
+        if "<tool_code" in lowered:
+            flags.append("tool_code_block")
+        if "<tool name=" in lowered:
+            flags.append("tool_name_tag")
+        if "<param name=" in lowered:
+            flags.append("tool_param_tag")
+        return flags
+
+    def _summarize_assistant_structure(self, message: Dict[str, Any], finish_reason: Any = None) -> Dict[str, Any]:
+        content = message.get("content") if isinstance(message, dict) else None
+        tool_calls = message.get("tool_calls") if isinstance(message, dict) else None
+        tool_names = []
+        if isinstance(tool_calls, list):
+            for item in tool_calls[:8]:
+                fn = item.get("function", {}) if isinstance(item, dict) else {}
+                name = fn.get("name") if isinstance(fn, dict) else None
+                if name:
+                    tool_names.append(str(name))
+        reasoning = None
+        if isinstance(message, dict):
+            reasoning = message.get("reasoning_content") or message.get("reasoning")
+        return {
+            "finish_reason": finish_reason,
+            "content_preview": self._preview_text(content),
+            "content_length": len(content) if isinstance(content, str) else None,
+            "structure_flags": self._extract_structure_flags(content),
+            "tool_call_count": len(tool_calls) if isinstance(tool_calls, list) else 0,
+            "tool_names": tool_names,
+            "has_reasoning": bool(reasoning),
+            "reasoning_preview": self._preview_text(reasoning, limit=120),
+        }
+
+    def _log_response_structure(
+        self,
+        *,
+        provider_name: str,
+        stage: str,
+        choice_index: int,
+        before: Dict[str, Any],
+        after: Dict[str, Any],
+    ) -> None:
+        try:
+            logger.info(
+                "provider_response_structure",
+                provider=provider_name,
+                provider_stage=stage,
+                provider_choice_index=choice_index,
+                response_structure_before=before,
+                response_structure_after=after,
+            )
+        except Exception:
+            pass
+
+    def _extract_tagged_tool_calls(self, content: Any):
+        if not isinstance(content, str):
+            return content, []
+
+        lowered = content.lower()
+        if "tool_call" not in lowered and "tool_code" not in lowered:
+            return content, []
+
+        tool_calls = []
+        for match in _TAGGED_TOOL_CALL_RE.finditer(content):
+            inner = (match.group(1) or "").strip()
+            if not inner:
+                continue
+
+            parsed = None
+            try:
+                parsed = json.loads(inner)
+            except Exception:
+                parsed = None
+
+            if isinstance(parsed, dict) and parsed.get("name"):
+                arguments = parsed.get("arguments", {})
+                if not isinstance(arguments, dict):
+                    arguments = {}
+                tool_calls.append({
+                    "id": self._make_tool_call_id(),
+                    "type": "function",
+                    "function": {
+                        "name": str(parsed["name"]),
+                        "arguments": json.dumps(arguments, ensure_ascii=False),
+                    },
+                })
+                continue
+
+            invoke_match = _INVOKE_RE.search(inner)
+            if invoke_match:
+                name = (invoke_match.group(1) or "").strip()
+                if name:
+                    params = {
+                        param_name.strip(): param_value.strip()
+                        for param_name, param_value in _PARAM_RE.findall(invoke_match.group(2) or "")
+                        if param_name.strip()
+                    }
+                    tool_calls.append({
+                        "id": self._make_tool_call_id(),
+                        "type": "function",
+                        "function": {
+                            "name": name,
+                            "arguments": json.dumps(params, ensure_ascii=False),
+                        },
+                    })
+                    continue
+
+            tool_tag_match = _TOOL_TAG_RE.search(inner)
+            if not tool_tag_match:
+                continue
+
+            name = (tool_tag_match.group(1) or "").strip()
+            if not name:
+                continue
+
+            params = {
+                param_name.strip(): param_value.strip()
+                for param_name, param_value in _TOOL_TAG_PARAM_RE.findall(tool_tag_match.group(2) or "")
+                if param_name.strip()
+            }
+            tool_calls.append({
+                "id": self._make_tool_call_id(),
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "arguments": json.dumps(params, ensure_ascii=False),
+                },
+            })
+
+        for match in _TOOL_CODE_RE.finditer(content):
+            inner = (match.group(1) or "").strip()
+            if not inner:
+                continue
+
+            name_match = _TOOL_CODE_NAME_RE.search(inner)
+            if not name_match:
+                continue
+            name = name_match.group(1).strip()
+            if not name:
+                continue
+
+            args_match = _TOOL_CODE_ARGS_RE.search(inner)
+            arguments = self._extract_tool_code_arguments(args_match.group(1) if args_match else "")
+            tool_calls.append({
+                "id": self._make_tool_call_id(),
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "arguments": json.dumps(arguments, ensure_ascii=False),
+                },
+            })
+
+        if not tool_calls:
+            return content, []
+
+        cleaned = _TAGGED_TOOL_CALL_RE.sub("", content)
+        cleaned = _TOOL_CODE_RE.sub("", cleaned)
+        cleaned = cleaned.strip()
+        return cleaned or None, tool_calls
+
+    @staticmethod
+    def _find_stream_tool_call_start(content: str) -> Optional[int]:
+        lowered = content.lower()
+        positions = [lowered.find(marker) for marker in _STREAM_TOOL_CALL_START_MARKERS]
+        positions = [pos for pos in positions if pos >= 0]
+        if not positions:
+            return None
+        return min(positions)
+
+    def _normalize_openai_compatible_stream_delta(
+        self,
+        *,
+        delta: Dict[str, Any],
+        finish_reason: Any,
+        choice_index: int,
+        stream_state: Optional[Dict[str, Any]] = None,
+    ) -> Any:
+        if not isinstance(delta, dict) or delta.get("tool_calls"):
+            return finish_reason
+
+        content = delta.get("content")
+        if not isinstance(content, str) or stream_state is None:
+            cleaned_content, tool_calls = self._extract_tagged_tool_calls(content)
+            if tool_calls:
+                delta["content"] = cleaned_content
+                delta["tool_calls"] = tool_calls
+                if finish_reason in (None, "stop"):
+                    finish_reason = "tool_calls"
+            return finish_reason
+
+        buffers = stream_state.setdefault("tagged_tool_call_buffers", {})
+        pending = buffers.get(choice_index)
+
+        if pending is not None:
+            pending += content
+            cleaned_content, tool_calls = self._extract_tagged_tool_calls(pending)
+            if tool_calls:
+                buffers.pop(choice_index, None)
+                delta["content"] = cleaned_content
+                delta["tool_calls"] = tool_calls
+                if finish_reason in (None, "stop"):
+                    finish_reason = "tool_calls"
+            else:
+                buffers[choice_index] = pending
+                delta["content"] = None
+            return finish_reason
+
+        start = self._find_stream_tool_call_start(content)
+        if start is None:
+            cleaned_content, tool_calls = self._extract_tagged_tool_calls(content)
+            if tool_calls:
+                delta["content"] = cleaned_content
+                delta["tool_calls"] = tool_calls
+                if finish_reason in (None, "stop"):
+                    finish_reason = "tool_calls"
+            return finish_reason
+
+        prefix = content[:start] or None
+        candidate = content[start:]
+        cleaned_content, tool_calls = self._extract_tagged_tool_calls(candidate)
+        if tool_calls:
+            merged_content = "".join(part for part in (prefix, cleaned_content) if part)
+            delta["content"] = merged_content or None
+            delta["tool_calls"] = tool_calls
+            if finish_reason in (None, "stop"):
+                finish_reason = "tool_calls"
+            return finish_reason
+
+        buffers[choice_index] = candidate
+        delta["content"] = prefix
+        return finish_reason
+
+    def _normalize_openai_compatible_response(self, result: Dict[str, Any], provider_name: str) -> Dict[str, Any]:
+        normalized = dict(result or {})
+        normalized["provider"] = provider_name
+
+        choices = normalized.get("choices")
+        if not isinstance(choices, list):
+            return normalized
+
+        for index, choice in enumerate(choices):
+            if not isinstance(choice, dict):
+                continue
+            message = choice.get("message")
+            if not isinstance(message, dict):
+                continue
+
+            before_summary = self._summarize_assistant_structure(message, choice.get("finish_reason"))
+
+            if not message.get("tool_calls"):
+                cleaned_content, tool_calls = self._extract_tagged_tool_calls(message.get("content"))
+                if tool_calls:
+                    message["content"] = cleaned_content
+                    message["tool_calls"] = tool_calls
+                    if choice.get("finish_reason") in (None, "stop"):
+                        choice["finish_reason"] = "tool_calls"
+
+            after_summary = self._summarize_assistant_structure(message, choice.get("finish_reason"))
+            self._log_response_structure(
+                provider_name=provider_name,
+                stage="response",
+                choice_index=index,
+                before=before_summary,
+                after=after_summary,
+            )
+
+        return normalized
+
+    def _normalize_openai_compatible_stream_chunk(
+        self,
+        chunk: Dict[str, Any],
+        provider_name: str,
+        stream_state: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        normalized = dict(chunk or {})
+        normalized["provider"] = provider_name
+
+        choices = normalized.get("choices")
+        if not isinstance(choices, list):
+            return normalized
+
+        for index, choice in enumerate(choices):
+            if not isinstance(choice, dict):
+                continue
+            delta = choice.get("delta")
+            if not isinstance(delta, dict):
+                continue
+
+            before_summary = self._summarize_assistant_structure(delta, choice.get("finish_reason"))
+            choice["finish_reason"] = self._normalize_openai_compatible_stream_delta(
+                delta=delta,
+                finish_reason=choice.get("finish_reason"),
+                choice_index=index,
+                stream_state=stream_state,
+            )
+
+            after_summary = self._summarize_assistant_structure(delta, choice.get("finish_reason"))
+            if before_summary["structure_flags"] or before_summary["tool_call_count"] or after_summary["tool_call_count"]:
+                self._log_response_structure(
+                    provider_name=provider_name,
+                    stage="stream_chunk",
+                    choice_index=index,
+                    before=before_summary,
+                    after=after_summary,
+                )
+
+        return normalized
     
     @abstractmethod
     def _get_headers(self) -> Dict[str, str]:

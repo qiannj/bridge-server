@@ -12,7 +12,7 @@ import os
 import time
 import importlib.util
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 import yaml
 
 # 启动时加载 .env 文件（~/.bridge-server/.env）
@@ -53,10 +53,15 @@ from .observability import (
     render_prometheus_metrics,
     setup_structured_logging,
 )
-from .services.routing import SmartRouter
+from .services.routing import RouteResult, SmartRouter
 from .services.savings import estimate_baseline_cost_rmb, estimate_model_cost_usd, resolve_baseline_model
+from .services.model_info import ModelInfoAggregator, set_model_info_aggregator, get_model_info_aggregator
+from .services.router_registry import RouterRegistry, set_router_registry, get_router_registry
+from .router_sdk import RoutingContext, RoutingDecision
 from .utils.cache import HybridCache
 from .utils.connection_pools import close_connection_pool_manager, get_connection_pool_manager
+from .services.bypass_router import BypassRouter, get_bypass_router, set_bypass_router
+from .services.expression_router import ExpressionRouter, get_expression_router, set_expression_router
 
 # 异步模块
 from .auth import get_auth_manager, get_current_user_async, AsyncAuthManager
@@ -75,6 +80,9 @@ cache_system: Optional[HybridCache] = None
 usage_tracker: Optional[UsageTrackerAsync] = None
 auth_manager: Optional[AsyncAuthManager] = None
 runtime_config: Dict[str, Any] = {}
+model_info_aggregator: Optional[ModelInfoAggregator] = None
+router_registry_instance: Optional[RouterRegistry] = None
+expression_router_instance: Optional[ExpressionRouter] = None
 
 
 def _resolve_config_dir() -> Path:
@@ -243,7 +251,7 @@ async def load_config_async() -> Dict[str, Any]:
 
 async def initialize_system():
     """初始化系统组件"""
-    global provider_manager, smart_router, cache_system, usage_tracker, auth_manager, connection_pool_manager, runtime_config
+    global provider_manager, smart_router, cache_system, usage_tracker, auth_manager, connection_pool_manager, runtime_config, model_info_aggregator, router_registry_instance, expression_router_instance
     
     logger.info("🚀 Bridge Server v2.0 系统初始化...")
     runtime_config = await load_config_async()
@@ -306,6 +314,42 @@ async def initialize_system():
     
     logger.info("✅ 系统初始化完成")
 
+    # 7. 初始化自定义路由框架
+    logger.info("初始化自定义路由框架...")
+    config_dir = _resolve_config_dir()
+    model_info_aggregator = ModelInfoAggregator(config_dir=config_dir)
+    set_model_info_aggregator(model_info_aggregator)
+    await model_info_aggregator.start()
+
+    router_registry_instance = RouterRegistry(routers_dir=config_dir / "routers")
+    set_router_registry(router_registry_instance)
+
+    active = router_registry_instance.get_active()
+    if active:
+        logger.info(f"自定义路由器 '{active}' 已加载")
+    else:
+        logger.info("无激活的自定义路由器，使用内置 SmartRouter")
+
+    # 8. 初始化旁路模型路由器
+    bypass_cfg = runtime_config.get("bypass_router", {})
+    bypass_router_inst = BypassRouter(bypass_cfg)
+    set_bypass_router(bypass_router_inst)
+    logger.info(
+        "旁路模型路由器已初始化",
+        enabled=bypass_router_inst.enabled,
+        routing_model=bypass_router_inst.routing_model or "(未配置)",
+    )
+
+    # 9. 初始化表达式路由器 (Layer 2)
+    expr_cfg = runtime_config.get("expression_router", {})
+    expression_router_inst = ExpressionRouter(expr_cfg)
+    set_expression_router(expression_router_inst)
+    logger.info(
+        "表达式路由器已初始化",
+        enabled=expression_router_inst.enabled,
+        rules_count=len(expression_router_inst._rules),
+    )
+
 
 # FastAPI应用
 # Disable interactive API docs in production (set ENABLE_DOCS=true only for dev).
@@ -362,6 +406,29 @@ async def require_auth(authorization: Optional[str] = Header(None)) -> Dict[str,
     if not token_info:
         raise HTTPException(status_code=401, detail="无效或已过期的认证令牌")
     return token_info
+
+
+def _ensure_model_allowed(
+    token_info: Dict[str, Any],
+    provider_id: str,
+    model_id: str,
+    requested_model: Optional[str] = None,
+) -> None:
+    """Enforce per-external-api-key model permissions."""
+    if token_info.get("type") != "external_api_key":
+        return
+
+    permissions = token_info.get("model_permissions") or []
+    full_model = f"{provider_id}/{model_id}"
+    requested = str(requested_model or "").strip()
+    allowed = {"*", full_model, model_id, f"{provider_id}/*"}
+    if not requested or requested == "smart":
+        allowed.add("smart")
+    if not any(str(item).strip() in allowed for item in permissions):
+        raise HTTPException(
+            status_code=403,
+            detail=f"API Key 无权访问模型 {full_model}",
+        )
 
 
 @app.middleware("http")
@@ -442,6 +509,9 @@ async def shutdown_event():
         usage_cleanup = usage_tracker.close()
         if inspect.isawaitable(usage_cleanup):
             cleanup_tasks.append(usage_cleanup)
+
+    if model_info_aggregator:
+        cleanup_tasks.append(model_info_aggregator.stop())
     
     if cleanup_tasks:
         await asyncio.gather(*cleanup_tasks, return_exceptions=True)
@@ -528,19 +598,69 @@ async def _collect_metrics_snapshot() -> Dict[str, Any]:
 def _build_model_catalog() -> List[Dict[str, Any]]:
     """Build a user-facing model catalog from the active providers."""
     if not provider_manager:
-        return []
+        return [
+            {
+                "id": "smart",
+                "object": "model",
+                "created": int(time.time()),
+                "owned_by": "bridge-server",
+                "provider": "bridge-server",
+                "canonical_id": "smart",
+                "is_alias": False,
+            }
+        ]
 
     models: List[Dict[str, Any]] = []
+    created = int(time.time())
+    bare_name_counts: Dict[str, int] = {}
+    provider_models: List[Tuple[str, str, Any]] = []
+
     for provider_id, provider in provider_manager.providers.items():
         for model_id in provider.get_supported_models():
+            bare_name_counts[model_id] = bare_name_counts.get(model_id, 0) + 1
             model_info = provider.get_model_info(model_id)
+            provider_models.append((provider_id, model_id, model_info))
+
+    models.append(
+        {
+            "id": "smart",
+            "object": "model",
+            "created": created,
+            "owned_by": "bridge-server",
+            "provider": "bridge-server",
+            "canonical_id": "smart",
+            "is_alias": False,
+            "description": "Bridge Server smart routing pseudo-model",
+        }
+    )
+
+    for provider_id, model_id, model_info in provider_models:
+        canonical_id = f"{provider_id}/{model_id}"
+        entry = {
+            "id": canonical_id,
+            "provider": provider_id,
+            "object": "model",
+            "created": created,
+            "owned_by": provider_id,
+            "canonical_id": canonical_id,
+            "is_alias": False,
+            "input_cost_per_1k": getattr(model_info, "input_cost_per_1k", None),
+            "output_cost_per_1k": getattr(model_info, "output_cost_per_1k", None),
+            "max_tokens": getattr(model_info, "max_tokens", None),
+            "context_window": getattr(model_info, "context_window", None),
+        }
+        models.append(entry)
+
+        if bare_name_counts.get(model_id) == 1:
             models.append(
                 {
                     "id": model_id,
                     "provider": provider_id,
                     "object": "model",
-                    "created": int(time.time()),
+                    "created": created,
                     "owned_by": provider_id,
+                    "canonical_id": canonical_id,
+                    "is_alias": True,
                     "input_cost_per_1k": getattr(model_info, "input_cost_per_1k", None),
                     "output_cost_per_1k": getattr(model_info, "output_cost_per_1k", None),
                     "max_tokens": getattr(model_info, "max_tokens", None),
@@ -549,6 +669,120 @@ def _build_model_catalog() -> List[Dict[str, Any]]:
             )
 
     return models
+
+
+def _split_model_ref(model_ref: str) -> Tuple[Optional[str], str]:
+    """Split a provider-qualified model ref while preserving slashes inside model IDs."""
+    value = (model_ref or "").strip()
+    if "/" not in value:
+        return None, value
+    provider_id, model_id = value.split("/", 1)
+    return provider_id.strip() or None, model_id.strip()
+
+
+# ── 空回合检测与兜底 ────────────────────────────────────────────────────────────
+
+def _detect_empty_non_stream_turn(response: Dict[str, Any]) -> bool:
+    """判断非流式响应是否为"空回合"：stop 但无可见内容、无 tool_calls。"""
+    choice0 = (response.get("choices") or [{}])[0]
+    message = choice0.get("message") or {}
+    finish_reason = choice0.get("finish_reason")
+    tool_calls = message.get("tool_calls") or []
+    function_call = message.get("function_call")
+    content = str(message.get("content") or "").strip()
+    return (
+        finish_reason in {"stop", None}
+        and not tool_calls
+        and not function_call
+        and not content
+    )
+
+
+def _is_tool_followup(messages: List[Dict[str, Any]]) -> bool:
+    """判断当前请求是否为工具执行后的 follow-up（最近一条非 system 消息为 tool）。"""
+    for m in reversed(messages):
+        role = m.get("role", "")
+        if role == "system":
+            continue
+        return role == "tool"
+    return False
+
+
+def _build_empty_turn_retry_messages(
+    messages: List[Dict[str, Any]], is_tool_followup: bool
+) -> List[Dict[str, Any]]:
+    """在原始消息列表末尾追加轻量指导系统提示，用于空回合重试。"""
+    if is_tool_followup:
+        guidance = (
+            "You have already received the tool result. "
+            "Now produce a concise user-facing answer based on that result. "
+            "Do not call tools again unless absolutely necessary. "
+            "Do not return an empty response."
+        )
+    else:
+        guidance = (
+            "Your previous response ended without any user-visible content. "
+            "Return either: 1. a normal assistant reply, or 2. a structured tool call. "
+            "Do not return an empty response."
+        )
+    return messages + [{"role": "system", "content": guidance}]
+
+
+def _make_fallback_text(is_tool_followup: bool) -> str:
+    """生成最小可见兜底文本。"""
+    if is_tool_followup:
+        return "工具已执行完成，但模型未生成最终回复。请重试一次。"
+    return "上游模型本轮未返回有效内容，请重试一次。"
+
+
+def _inject_fallback_into_response(response: Dict[str, Any], text: str) -> None:
+    """将兜底文本注入非流式响应（就地修改）。"""
+    choices = response.setdefault("choices", [{}])
+    if not choices:
+        choices.append({})
+    message = choices[0].setdefault("message", {})
+    message["content"] = text
+    message["role"] = "assistant"
+    choices[0]["finish_reason"] = "stop"
+    """Resolve the OpenAI `model` field into a direct provider/model route.
+
+    Returns None for missing or `smart`, which means the smart router should be used.
+    """
+    requested_model = str(model_ref or "").strip()
+    if not requested_model or requested_model == "smart":
+        return None
+
+    provider_id, model_id = _split_model_ref(requested_model)
+    all_models = manager.get_provider_models()
+
+    if provider_id:
+        if provider_id not in all_models:
+            raise HTTPException(status_code=400, detail=f"未知 Provider: {provider_id}")
+        if model_id not in all_models.get(provider_id, []):
+            raise HTTPException(status_code=400, detail=f"Provider {provider_id} 不支持模型 {model_id}")
+        return RouteResult(
+            provider_id=provider_id,
+            model=model_id,
+            task_type="direct",
+            confidence=1.0,
+            reason=f"客户端指定模型: {provider_id}/{model_id}",
+        )
+
+    matches = [(pid, models) for pid, models in all_models.items() if model_id in models]
+    if not matches:
+        raise HTTPException(status_code=400, detail=f"未知模型: {model_id}")
+    if len(matches) > 1:
+        candidates = ", ".join(f"{pid}/{model_id}" for pid, _models in matches)
+        raise HTTPException(status_code=400, detail=f"模型名不唯一，请使用 provider/model: {candidates}")
+
+    matched_provider = matches[0][0]
+    return RouteResult(
+        provider_id=matched_provider,
+        model=model_id,
+        task_type="direct",
+        confidence=1.0,
+        reason=f"客户端指定裸模型名，匹配为: {matched_provider}/{model_id}",
+    )
 
 
 @app.get("/metrics")
@@ -669,6 +903,18 @@ async def chat_completions(
         
         messages = req_dict["messages"]
         stream = req_dict.get("stream", False)
+
+        # 提取并转发所有 OpenAI 兼容参数（tools、tool_choice 等）
+        # 关键：若不转发 tools，上游模型无法感知可用工具，会退化为 XML 文本格式
+        _FORWARDED_KEYS = (
+            "tools", "tool_choice", "parallel_tool_calls",
+            "stop", "response_format",
+            "presence_penalty", "frequency_penalty",
+            "top_p", "seed", "n",
+        )
+        extra_kwargs: Dict[str, Any] = {
+            k: req_dict[k] for k in _FORWARDED_KEYS if k in req_dict
+        }
         
         # 2. 并发执行用户信息查询和路由决策（性能优化）
         perf_parallel_start = time.perf_counter()
@@ -702,16 +948,113 @@ async def chat_completions(
         
         if not smart_router or not provider_manager:
             raise HTTPException(status_code=500, detail="系统组件未初始化")
-        
-        route_result = await smart_router.route(
-            messages=messages,
-            user_context={
-                **user_context,
-                "user_id": current_user.get("user_id"),
-                "user_domain": current_user.get("domain", "general"),
-            },
-            provider_manager=provider_manager
-        )
+
+        # 1) 优先解析用户明确指定的 model（provider/model 或 model_id）
+        requested_model = req_dict.get("model")
+        route_result = _resolve_requested_model(requested_model, provider_manager)
+
+        # 1.5) 旁路模型路由器（用户配置的 LLM 路由决策 + 可选上下文压缩）
+        if route_result is None:
+            _br = get_bypass_router()
+            if _br and _br.enabled:
+                try:
+                    _br_result, messages = await _br.route(messages, provider_manager)
+                    if _br_result is not None:
+                        route_result = _br_result
+                        logger.info(
+                            "bypass_router_selected",
+                            provider=_br_result.provider_id,
+                            model=_br_result.model,
+                            reason=_br_result.reason,
+                        )
+                except Exception as _br_exc:
+                    logger.warning("bypass_router_error", error=str(_br_exc))
+
+        # 2) 表达式路由器 (Layer 2 — 无代码执行风险)
+        if route_result is None:
+            _expr_router = get_expression_router()
+            if _expr_router and _expr_router.enabled:
+                try:
+                    _user_msg = next(
+                        (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
+                        "",
+                    )
+                    _expr_match = _expr_router.route(str(_user_msg))
+                    if _expr_match is not None:
+                        _ep_id, _em_id, _er = _expr_match
+                        from .services.routing.router import RouteResult as _RR
+                        route_result = _RR(
+                            provider_id=_ep_id,
+                            model=_em_id,
+                            task_type="expression",
+                            confidence=0.88,
+                            reason=f"表达式路由: {_er}",
+                            from_cache=False,
+                        )
+                        logger.info(
+                            "expression_router_selected",
+                            provider=_ep_id,
+                            model=_em_id,
+                            reason=_er,
+                        )
+                except Exception as _expr_exc:
+                    logger.warning("expression_router_error", error=str(_expr_exc))
+
+        # 3) 自定义 Python 插件路由器（子进程沙箱执行）
+        if route_result is None:
+            _registry = get_router_registry()
+            _active_router = _registry.get_active() if _registry else None
+
+            if _active_router and _registry:
+                _aggregator = get_model_info_aggregator()
+                _model_list = _aggregator.get_snapshot() if _aggregator else []
+                _ctx = RoutingContext(
+                    last_user_message=next(
+                        (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
+                        "",
+                    ),
+                    messages_count=len(messages),
+                    models=_model_list,
+                    session_metadata={
+                        "user_id": current_user.get("user_id"),
+                        "user_domain": current_user.get("domain", "general"),
+                    },
+                )
+                _ok, _result = await _registry.execute(_active_router, _ctx)
+                if _ok and isinstance(_result, RoutingDecision):
+                    from .services.routing.router import RouteResult  # local import to avoid circular
+                    route_result = RouteResult(
+                        provider_id=_result.provider,
+                        model=_result.model,
+                        task_type="custom",
+                        confidence=_result.confidence,
+                        reason=_result.reason,
+                        from_cache=False,
+                    )
+                    logger.info(
+                        "custom_router_selected",
+                        router=_active_router,
+                        provider=_result.provider,
+                        model=_result.model,
+                        confidence=round(_result.confidence, 3),
+                        reason=_result.reason,
+                    )
+                else:
+                    logger.warning(
+                        "custom_router_fallback",
+                        router=_active_router,
+                        error=str(_result),
+                    )
+        if route_result is None:
+            route_result = await smart_router.route(
+                messages=messages,
+                user_context={
+                    **user_context,
+                    "user_id": current_user.get("user_id"),
+                    "user_domain": current_user.get("domain", "general"),
+                },
+                provider_manager=provider_manager
+            )
         
         route_time = (time.perf_counter() - perf_route_start) * 1000
         bind_llm_context(provider_id=route_result.provider_id, model=route_result.model)
@@ -731,6 +1074,7 @@ async def chat_completions(
             from_cache=route_result.from_cache,
             duration_ms=round(route_time, 2),
         )
+        _ensure_model_allowed(_auth, route_result.provider_id, route_result.model, requested_model)
         
         # 4. 执行模型调用
         perf_llm_start = time.perf_counter()
@@ -743,6 +1087,7 @@ async def chat_completions(
                     route_result=route_result,
                     current_user=current_user,
                     req_dict=req_dict,
+                    extra_kwargs=extra_kwargs,
                     perf_start=perf_start
                 ),
                 media_type="text/event-stream",
@@ -760,7 +1105,8 @@ async def chat_completions(
                     provider_id=route_result.provider_id,
                     max_tokens=req_dict.get("max_tokens", 4000),
                     temperature=req_dict.get("temperature", 0.7),
-                    stream=False
+                    stream=False,
+                    **extra_kwargs,
                 )
             except Exception:
                 llm_time = (time.perf_counter() - perf_llm_start) * 1000
@@ -779,7 +1125,55 @@ async def chat_completions(
                 "success",
                 llm_time / 1000,
             )
-            
+
+            # 4b. 空回合检测与兜底（非流式）
+            _is_tool_fu = _is_tool_followup(messages)
+            if _detect_empty_non_stream_turn(response):
+                _orig_reasoning = bool(
+                    ((response.get("choices") or [{}])[0].get("message") or {}).get("reasoning_content")
+                )
+                logger.warning(
+                    "empty_turn_detected",
+                    provider=route_result.provider_id,
+                    model=route_result.model,
+                    stream=False,
+                    had_reasoning=_orig_reasoning,
+                    had_visible_text=False,
+                    had_tool_calls=False,
+                    last_input_role="tool" if _is_tool_fu else "user",
+                    fallback_stage="initial",
+                )
+                _retry_ok = False
+                try:
+                    logger.info("empty_turn_retry_started", stream=False)
+                    _retry_resp = await provider_manager.chat_completion(
+                        messages=_build_empty_turn_retry_messages(messages, _is_tool_fu),
+                        model=route_result.model,
+                        provider_id=route_result.provider_id,
+                        max_tokens=req_dict.get("max_tokens", 4000),
+                        temperature=req_dict.get("temperature", 0.7),
+                        stream=False,
+                        **extra_kwargs,
+                    )
+                    if not _detect_empty_non_stream_turn(_retry_resp):
+                        response = _retry_resp
+                        _retry_ok = True
+                        logger.info(
+                            "empty_turn_retry_succeeded",
+                            provider=route_result.provider_id,
+                            model=route_result.model,
+                        )
+                    else:
+                        logger.warning("empty_turn_retry_failed_still_empty",
+                                       provider=route_result.provider_id, model=route_result.model)
+                except Exception as _retry_exc:
+                    logger.error("empty_turn_retry_error", error=str(_retry_exc))
+                if not _retry_ok:
+                    _inject_fallback_into_response(response, _make_fallback_text(_is_tool_fu))
+                    logger.info("empty_turn_fallback_emitted",
+                                provider=route_result.provider_id, model=route_result.model,
+                                is_tool_followup=_is_tool_fu)
+
             # 5. 异步记录用量（不阻塞响应）
             if usage_tracker and "usage" in response:
                 usage_info = response["usage"]
@@ -862,9 +1256,16 @@ async def _stream_chat_completion(
     route_result, 
     current_user: Dict[str, Any],
     req_dict: Dict[str, Any],
+    extra_kwargs: Dict[str, Any],
     perf_start: float
 ):
-    """流式聊天完成，支持 reasoning_content（思维链模型）实时流出"""
+    """流式聊天完成，支持 reasoning_content（思维链模型）实时流出。
+
+    失败降级策略：
+    - 若流式失败且尚未向客户端发送任何内容，自动降级为非流式请求，
+      将结果转成 SSE 格式推出，客户端无感知。
+    - 若已发送部分内容后失败，推送 stream_error 事件（无法回滚）。
+    """
     llm_start = time.perf_counter()
 
     routing_info = {
@@ -876,107 +1277,271 @@ async def _stream_chat_completion(
         "confidence": route_result.confidence,
     }
 
+    if not provider_manager:
+        error_chunk = {"error": {"message": "Provider管理器未初始化", "type": "stream_error"}}
+        yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
+        return
+
+    content_chunks_sent = 0  # 记录已发送的含内容 chunk 数量（用于判断是否可降级）
+    first_chunk = True
+    prompt_tokens = 0
+    completion_tokens = 0
+    reasoning_chars = 0
+    stream_err: Optional[Exception] = None
+    seen_visible_chars = 0   # 可见正文字符数（不含 reasoning，用于空回合检测）
+    seen_tool_calls = False  # 是否出现过 tool_calls delta
+    last_finish_reason: Optional[str] = None
+
     try:
-        if not provider_manager:
-            raise RuntimeError("Provider管理器未初始化")
-
-        first_chunk = True
-        prompt_tokens = 0
-        completion_tokens = 0
-        reasoning_chars = 0  # 追踪 reasoning_content 总长度（用于日志）
-
         async for chunk in provider_manager.chat_completion_stream(
             messages=messages,
             model=route_result.model,
             provider_id=route_result.provider_id,
             max_tokens=req_dict.get("max_tokens", 4000),
             temperature=req_dict.get("temperature", 0.7),
-            stream_options={"include_usage": True},  # 要求上游在流结束时返回 usage
+            stream_options={"include_usage": True},
+            **extra_kwargs,
         ):
-            # 解析 chunk
             if isinstance(chunk, str):
                 try:
                     payload = json.loads(chunk)
                 except json.JSONDecodeError:
                     yield f"data: {chunk}\n\n"
+                    content_chunks_sent += 1
                     continue
             else:
                 payload = chunk
 
-            # 累计 token 使用量（上游在最后一个 chunk 携带 usage 字段）
             if isinstance(payload, dict) and "usage" in payload and payload["usage"]:
                 usage = payload["usage"]
                 prompt_tokens = usage.get("prompt_tokens", prompt_tokens)
                 completion_tokens = usage.get("completion_tokens", completion_tokens)
 
-            # 统计 reasoning_content 字符数（用于日志）
             if isinstance(payload, dict):
                 for choice in payload.get("choices", []):
                     delta = choice.get("delta", {})
                     rc = delta.get("reasoning_content") or ""
                     reasoning_chars += len(rc)
+                    # 只有携带实际内容的 chunk 才计数
+                    if delta.get("content") or delta.get("reasoning_content"):
+                        content_chunks_sent += 1
+                    # 空回合检测状态跟踪
+                    seen_visible_chars += len(delta.get("content") or "")
+                    if delta.get("tool_calls"):
+                        seen_tool_calls = True
+                    fr = choice.get("finish_reason")
+                    if fr:
+                        last_finish_reason = fr
 
-            # 将路由信息注入到第一个有效 chunk（让客户端知道路由决策）
             if first_chunk and isinstance(payload, dict):
                 first_chunk = False
-                # usage 可能是 null（NVIDIA 流式第一帧），需显式覆盖
                 if not isinstance(payload.get("usage"), dict):
                     payload["usage"] = {}
                 payload["usage"]["routing"] = routing_info
 
             yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
+    except Exception as e:
+        stream_err = e
+
+    if stream_err is not None:
         llm_time = (time.perf_counter() - llm_start) * 1000
         metrics_collector.record_llm_call(
-            route_result.provider_id,
-            route_result.model,
-            "success",
-            llm_time / 1000,
+            route_result.provider_id, route_result.model, "error", llm_time / 1000,
         )
-        if completion_tokens:
-            metrics_collector.record_token_usage(
-                route_result.provider_id,
-                route_result.model,
-                prompt_tokens,
-                completion_tokens,
+
+        if content_chunks_sent == 0:
+            # ── 降级到非流式 ──────────────────────────────────────────────
+            logger.warning(
+                "stream_failed_before_content_fallback_to_non_stream",
+                provider=route_result.provider_id,
+                model=route_result.model,
+                error=str(stream_err),
             )
+            try:
+                response = await provider_manager.chat_completion(
+                    messages=messages,
+                    model=route_result.model,
+                    provider_id=route_result.provider_id,
+                    max_tokens=req_dict.get("max_tokens", 4000),
+                    temperature=req_dict.get("temperature", 0.7),
+                    stream=False,
+                    **extra_kwargs,
+                )
+                # 将非流式响应转成两个 SSE chunk（content delta + stop）
+                resp_id = response.get("id") or f"chatcmpl-fallback-{int(time.time())}"
+                resp_created = response.get("created") or int(time.time())
+                resp_model = response.get("model") or route_result.model
+                choice0 = (response.get("choices") or [{}])[0]
+                message = choice0.get("message") or {}
+                content = message.get("content") or ""
+                reasoning = message.get("reasoning_content") or ""
 
-        asyncio.create_task(_record_usage_background(
-            route_result=route_result,
-            usage_info={"completion_tokens": completion_tokens, "prompt_tokens": prompt_tokens},
-            current_user=current_user,
-            duration_ms=llm_time
-        ))
+                usage_info = response.get("usage") or {}
+                prompt_tokens = usage_info.get("prompt_tokens", 0)
+                completion_tokens = usage_info.get("completion_tokens", 0)
 
-        # 发送结束标记
-        yield "data: [DONE]\n\n"
+                delta_payload: Dict[str, Any] = {
+                    "id": resp_id,
+                    "object": "chat.completion.chunk",
+                    "created": resp_created,
+                    "model": resp_model,
+                    "choices": [{
+                        "index": 0,
+                        "delta": {"role": "assistant", "content": content},
+                        "finish_reason": None,
+                    }],
+                    "usage": {**usage_info, "routing": routing_info, "fallback": True},
+                }
+                if reasoning:
+                    delta_payload["choices"][0]["delta"]["reasoning_content"] = reasoning
 
-        total_time = (time.perf_counter() - perf_start) * 1000
-        logger.info(
-            "stream_completion_finished",
+                yield f"data: {json.dumps(delta_payload, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'id': resp_id, 'object': 'chat.completion.chunk', 'created': resp_created, 'model': resp_model, 'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'stop'}]}, ensure_ascii=False)}\n\n"
+                yield "data: [DONE]\n\n"
+
+                llm_time = (time.perf_counter() - llm_start) * 1000
+                metrics_collector.record_llm_call(
+                    route_result.provider_id, route_result.model, "success", llm_time / 1000,
+                )
+                if completion_tokens:
+                    metrics_collector.record_token_usage(
+                        route_result.provider_id, route_result.model,
+                        prompt_tokens, completion_tokens,
+                    )
+                asyncio.create_task(_record_usage_background(
+                    route_result=route_result,
+                    usage_info=usage_info,
+                    current_user=current_user,
+                    duration_ms=llm_time,
+                ))
+                logger.info(
+                    "stream_fallback_non_stream_success",
+                    provider=route_result.provider_id,
+                    model=route_result.model,
+                    content_len=len(content),
+                )
+                return
+
+            except Exception as fallback_err:
+                logger.error(
+                    "stream_and_fallback_both_failed",
+                    provider=route_result.provider_id,
+                    model=route_result.model,
+                    stream_error=str(stream_err),
+                    fallback_error=str(fallback_err),
+                )
+                error_chunk = {
+                    "error": {"message": str(stream_err), "type": "stream_error", "fallback_error": str(fallback_err)}
+                }
+                yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
+                return
+        else:
+            # 已发出部分内容，无法回滚，直接报错
+            error_chunk = {"error": {"message": str(stream_err), "type": "stream_error"}}
+            yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
+            return
+
+    # ── 正常流式完成 ─────────────────────────────────────────────────────────
+    llm_time = (time.perf_counter() - llm_start) * 1000
+    metrics_collector.record_llm_call(
+        route_result.provider_id, route_result.model, "success", llm_time / 1000,
+    )
+    if completion_tokens:
+        metrics_collector.record_token_usage(
+            route_result.provider_id, route_result.model, prompt_tokens, completion_tokens,
+        )
+    asyncio.create_task(_record_usage_background(
+        route_result=route_result,
+        usage_info={"completion_tokens": completion_tokens, "prompt_tokens": prompt_tokens},
+        current_user=current_user,
+        duration_ms=llm_time,
+    ))
+
+    # ── 空回合检测（流式）────────────────────────────────────────────────────
+    if last_finish_reason == "stop" and seen_visible_chars == 0 and not seen_tool_calls:
+        _is_tool_fu = _is_tool_followup(messages)
+        logger.warning(
+            "empty_turn_detected",
             provider=route_result.provider_id,
             model=route_result.model,
-            total_duration_ms=round(total_time, 2),
-            llm_duration_ms=round(llm_time, 2),
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            reasoning_chars=reasoning_chars,
+            stream=True,
+            had_reasoning=reasoning_chars > 0,
+            had_visible_text=False,
+            had_tool_calls=False,
+            last_input_role="tool" if _is_tool_fu else "user",
+            fallback_stage="initial",
         )
+        _et_id = f"chatcmpl-et-{int(time.time())}"
+        _et_created = int(time.time())
+        _fallback_text: Optional[str] = None
 
-    except Exception as e:
-        metrics_collector.record_llm_call(
-            route_result.provider_id,
-            route_result.model,
-            "error",
-            max((time.perf_counter() - llm_start), 0.0),
-        )
-        error_chunk = {
-            "error": {
-                "message": str(e),
-                "type": "stream_error"
-            }
+        try:
+            logger.info("empty_turn_retry_started", stream=True,
+                        provider=route_result.provider_id, model=route_result.model)
+            _retry_resp = await provider_manager.chat_completion(
+                messages=_build_empty_turn_retry_messages(messages, _is_tool_fu),
+                model=route_result.model,
+                provider_id=route_result.provider_id,
+                max_tokens=req_dict.get("max_tokens", 4000),
+                temperature=req_dict.get("temperature", 0.7),
+                stream=False,
+                **extra_kwargs,
+            )
+            _retry_choice = (_retry_resp.get("choices") or [{}])[0]
+            _retry_content = str((_retry_choice.get("message") or {}).get("content") or "").strip()
+            if _retry_content:
+                logger.info("empty_turn_retry_succeeded", provider=route_result.provider_id,
+                            model=route_result.model, content_len=len(_retry_content))
+                _fallback_text = _retry_content
+                _et_id = _retry_resp.get("id") or _et_id
+                _et_created = _retry_resp.get("created") or _et_created
+                # Update token counters
+                _ru = _retry_resp.get("usage") or {}
+                prompt_tokens = _ru.get("prompt_tokens", prompt_tokens)
+                completion_tokens = _ru.get("completion_tokens", completion_tokens)
+            else:
+                logger.warning("empty_turn_retry_failed_still_empty",
+                               provider=route_result.provider_id, model=route_result.model)
+        except Exception as _et_exc:
+            logger.error("empty_turn_retry_error", error=str(_et_exc))
+
+        if _fallback_text is None:
+            _fallback_text = _make_fallback_text(_is_tool_fu)
+            logger.info("empty_turn_fallback_emitted", provider=route_result.provider_id,
+                        model=route_result.model, is_tool_followup=_is_tool_fu)
+
+        _delta_chunk: Dict[str, Any] = {
+            "id": _et_id,
+            "object": "chat.completion.chunk",
+            "created": _et_created,
+            "model": route_result.model,
+            "choices": [{"index": 0, "delta": {"role": "assistant", "content": _fallback_text}, "finish_reason": None}],
+            "usage": {"routing": routing_info, "empty_turn_fallback": True},
         }
-        yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
+        _stop_chunk: Dict[str, Any] = {
+            "id": _et_id,
+            "object": "chat.completion.chunk",
+            "created": _et_created,
+            "model": route_result.model,
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+        }
+        yield f"data: {json.dumps(_delta_chunk, ensure_ascii=False)}\n\n"
+        yield f"data: {json.dumps(_stop_chunk, ensure_ascii=False)}\n\n"
+
+    yield "data: [DONE]\n\n"
+
+    total_time = (time.perf_counter() - perf_start) * 1000
+    logger.info(
+        "stream_completion_finished",
+        provider=route_result.provider_id,
+        model=route_result.model,
+        total_duration_ms=round(total_time, 2),
+        llm_duration_ms=round(llm_time, 2),
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        reasoning_chars=reasoning_chars,
+    )
 
 
 async def _record_usage_background(
@@ -1032,15 +1597,35 @@ async def _record_usage_background(
 
 
 @app.get("/v1/models")
-async def list_models():
-    """列出可用模型"""
-    
+async def list_models(
+    _auth: Dict[str, Any] = Depends(require_auth),
+):
+    """列出可用模型（需要认证；外部 API Key 仅返回其有权限的模型）"""
+
     if not provider_manager:
         return {"data": []}
-    
+
     try:
-        return {"data": _build_model_catalog()}
-        
+        all_models = _build_model_catalog()
+
+        # External API keys only see models they are permitted to use.
+        if _auth.get("type") == "external_api_key":
+            permissions = _auth.get("model_permissions") or []
+            if "*" not in permissions:
+                def _allowed(entry: Dict[str, Any]) -> bool:
+                    mid = entry.get("id", "")
+                    cid = entry.get("canonical_id", mid)
+                    pid = entry.get("provider", "")
+                    return (
+                        mid == "smart"
+                        or mid in permissions
+                        or cid in permissions
+                        or f"{pid}/*" in permissions
+                    )
+                all_models = [m for m in all_models if _allowed(m)]
+
+        return {"data": all_models}
+
     except Exception as e:
         logger.error(f"获取模型列表失败: {str(e)}")
         return {"data": [], "error": str(e)}

@@ -36,6 +36,7 @@
 ## Bridge Server 的方案
 
 - **统一 OpenAI 兼容接口**：`POST /v1/chat/completions`
+- **稳定模型目录**：`GET /v1/models` 返回 `smart`、`provider/model` 和不冲突的裸模型别名
 - **智能模型路由**：根据任务类型自动选模型
 - **用量与预算控制**：`/api/usage`、`/api/budget`
 - **健康与观测**：`/health`、`/ready`、`/metrics`、`/metrics/prometheus`、`/stats`
@@ -71,6 +72,13 @@ curl -X POST http://127.0.0.1:19377/v1/chat/completions \
     "messages": [{"role": "user", "content": "写个 Python 快速排序"}]
   }'
 ```
+
+模型选择规则：
+
+- 不传 `model` 或传 `"smart"`：启用 Bridge Server 智能路由。
+- 传 `"provider/model-id"`：直接调用指定 Provider 的指定模型，例如 `"scnet/MiniMax-M2.5"`。
+- 传裸模型名：仅当该模型名只属于一个 Provider 时兼容识别；生产环境推荐使用 `provider/model-id`。
+- 未知模型会返回 400，不会被静默改写成智能路由结果。
 
 ## 架构概览
 

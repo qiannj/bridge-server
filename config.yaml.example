@@ -134,3 +134,75 @@ metrics:
   enabled: true
   export_prometheus: false
   prometheus_port: 9090
+
+# 旁路模型路由器
+# 通过指定的 LLM 对每条请求做动态路由决策，并可压缩过长上下文
+bypass_router:
+  enabled: false
+  # 路由决策模型，格式：provider/model-id，建议使用低成本快速模型
+  routing_model: "dashscope/qwen3.5-flash"
+  # 自然语言路由规则，将被注入到路由提示词中
+  routing_rules: |
+    - 代码生成、调试、架构设计任务 → dashscope/qwen3-coder-plus
+    - 创意写作、长文本 → moonshot/kimi-chat
+    - 其他通用任务 → dashscope/qwen3.5-plus
+  # 路由超时（毫秒），超时自动降级到场景路由
+  timeout_ms: 3000
+  # 消息数超过此阈值时，路由器才被允许建议压缩上下文
+  compress_context_threshold: 10
+  # 可选：自定义路由提示词（留空使用内置默认值）
+  # routing_prompt: ""
+  # 可选：自定义上下文压缩提示词（留空使用内置默认值）
+  # compress_prompt: ""
+
+# 表达式路由器 (Layer 2 — 安全表达式，无代码执行风险)
+# 优先级：bypass_router → expression_router → 自定义 Python 插件 → SmartRouter
+# 表达式语法：len/contains/match/starts_with/ends_with/hour/weekday + 比较/逻辑运算
+# 完全安全：不调用 Python eval()，通过 AST 白名单验证，无文件/网络访问
+expression_router:
+  enabled: false
+  rules:
+    # 编程任务 → 代码模型（高优先级）
+    - expr: "match(message, r'代码|编程|函数|debug|bug|algorithm|python|javascript|typescript')"
+      model: "dashscope/qwen3-coder-plus"
+      reason: "编程任务"
+      priority: 20
+
+    # 长文本 + 分析类 → 长上下文模型
+    - expr: "len(message) > 2000 and match(message, r'分析|总结|报告|摘要')"
+      model: "moonshot/kimi-chat"
+      reason: "长文分析"
+      priority: 15
+
+    # 夜间低峰期 → 低成本快速模型（22:00 - 08:00）
+    - expr: "hour() >= 22 or hour() < 8"
+      model: "dashscope/qwen3.5-flash"
+      reason: "夜间低成本"
+      priority: 5
+
+    # 简短问候 → 极速模型
+    - expr: "len(message) < 20 and match(message, r'你好|hi|hello|在吗')"
+      model: "dashscope/qwen3.5-flash"
+      reason: "简单问候"
+      priority: 10
+
+# 场景路由（SmartRouter）兜底，支持 patterns 正则 和 conditions 声明式条件
+scenarios:
+  # conditions 示例：声明式条件（优先于 patterns，无代码风险）
+  # long_document:
+  #   enabled: true
+  #   priority: 20
+  #   conditions:
+  #     any_of:
+  #       - message_length_gt: 2000
+  #       - message_contains: "全文|整篇|长篇"
+  #   model: "moonshot/kimi-chat"
+  #
+  # off_hours_cheap:
+  #   priority: 5
+  #   conditions:
+  #     all_of:
+  #       - time_hour_between: [22, 8]    # 跨午夜
+  #       - message_length_lt: 500
+  #   model: "dashscope/qwen3.5-flash"
+

@@ -3,18 +3,21 @@
 
 import json
 import os
+import re as _re
 import secrets
 import sqlite3
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 import yaml
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+
+from bridge_server.auth import _HASHED_FORMAT_MARKER, _HASHED_FORMAT_VALUE, _hash_token
 
 GITHUB_REPO = "qiannj/bridge-server"
 GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -37,6 +40,7 @@ def _load_yaml(path: Path) -> dict:
 
 
 def _save_yaml(path: Path, data: dict):
+    path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(data, f, allow_unicode=True, default_flow_style=False)
 
@@ -55,6 +59,151 @@ def generate_panel_token() -> str:
     auth["panel_token"] = token
     _save_yaml(auth_file, auth)
     return token
+
+
+def _tokens_file() -> Path:
+    return _get_config_dir() / "tokens.json"
+
+
+def _load_tokens() -> Dict[str, Any]:
+    path = _tokens_file()
+    if not path.exists():
+        return {_HASHED_FORMAT_MARKER: _HASHED_FORMAT_VALUE}
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f) or {}
+    if data.get(_HASHED_FORMAT_MARKER) != _HASHED_FORMAT_VALUE:
+        migrated: Dict[str, Any] = {_HASHED_FORMAT_MARKER: _HASHED_FORMAT_VALUE}
+        for key, value in data.items():
+            if not str(key).startswith("_"):
+                migrated[_hash_token(str(key))] = value
+        return migrated
+    return data
+
+
+def _save_tokens(data: Dict[str, Any]) -> None:
+    data[_HASHED_FORMAT_MARKER] = _HASHED_FORMAT_VALUE
+    path = _tokens_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    try:
+        import bridge_server.auth as auth_module
+        if auth_module.auth_manager is not None:
+            auth_module.auth_manager.clear_cache()
+    except Exception:
+        pass
+
+
+def _parse_expires_at(value: Optional[float] = None, iso_value: Optional[str] = None) -> Optional[float]:
+    if value is not None:
+        return float(value)
+    if not iso_value:
+        return None
+    text = iso_value.strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    return datetime.fromisoformat(text).timestamp()
+
+
+def _api_key_response(key_hash: str, info: Dict[str, Any]) -> Dict[str, Any]:
+    expires_at = info.get("expires_at")
+    return {
+        "id": key_hash[:16],
+        "name": info.get("name") or info.get("user_id") or "External API Key",
+        "key_preview": info.get("key_preview", "sk-****"),
+        "model_permissions": info.get("model_permissions") or ["*"],
+        "expires_at": expires_at,
+        "expires_at_iso": datetime.fromtimestamp(expires_at).isoformat() if expires_at else None,
+        "active": bool(info.get("active", True)),
+        "created_at": info.get("created_at"),
+        "updated_at": info.get("updated_at"),
+    }
+
+
+def list_external_api_keys() -> List[Dict[str, Any]]:
+    tokens = _load_tokens()
+    keys = []
+    for key_hash, info in tokens.items():
+        if str(key_hash).startswith("_") or not isinstance(info, dict):
+            continue
+        if info.get("type") == "external_api_key":
+            keys.append(_api_key_response(key_hash, info))
+    return sorted(keys, key=lambda item: item.get("created_at") or 0, reverse=True)
+
+
+def create_external_api_key(
+    *,
+    name: str,
+    model_permissions: Optional[List[str]] = None,
+    expires_at: Optional[float] = None,
+) -> Dict[str, Any]:
+    token = "sk-" + secrets.token_hex(32)
+    token_hash = _hash_token(token)
+    now = time.time()
+    permissions = [p.strip() for p in (model_permissions or ["*"]) if str(p).strip()]
+    if not permissions:
+        permissions = ["*"]
+
+    tokens = _load_tokens()
+    info = {
+        "type": "external_api_key",
+        "user_id": f"api-key:{name}",
+        "name": name,
+        "key_preview": token[:8] + "..." + token[-4:],
+        "model_permissions": permissions,
+        "expires_at": expires_at,
+        "active": True,
+        "created_at": now,
+        "updated_at": now,
+    }
+    tokens[token_hash] = info
+    _save_tokens(tokens)
+    return {"token": token, **_api_key_response(token_hash, info)}
+
+
+def update_external_api_key(
+    key_id: str,
+    *,
+    name: Optional[str] = None,
+    model_permissions: Optional[List[str]] = None,
+    expires_at: Any = ...,
+    active: Optional[bool] = None,
+) -> Dict[str, Any]:
+    tokens = _load_tokens()
+    matches = [
+        key_hash for key_hash, info in tokens.items()
+        if not str(key_hash).startswith("_")
+        and str(key_hash).startswith(key_id)
+        and isinstance(info, dict)
+        and info.get("type") == "external_api_key"
+    ]
+    if not matches:
+        raise KeyError(key_id)
+    if len(matches) > 1:
+        raise ValueError("API Key ID 不唯一，请使用更长的 ID")
+
+    key_hash = matches[0]
+    info = tokens[key_hash]
+    if name is not None:
+        info["name"] = name
+        info["user_id"] = f"api-key:{name}"
+    if model_permissions is not None:
+        permissions = [p.strip() for p in model_permissions if str(p).strip()]
+        info["model_permissions"] = permissions or ["*"]
+    if expires_at is not ...:
+        info["expires_at"] = expires_at
+    if active is not None:
+        info["active"] = active
+    info["updated_at"] = time.time()
+    tokens[key_hash] = info
+    _save_tokens(tokens)
+    return _api_key_response(key_hash, info)
+
+
+def delete_external_api_key(key_id: str) -> None:
+    update_external_api_key(key_id, active=False)
 
 
 async def require_panel_auth(
@@ -78,6 +227,22 @@ class TokenRequest(BaseModel):
     token: str
 
 
+class ExternalApiKeyCreateRequest(BaseModel):
+    name: str
+    model_permissions: List[str] = Field(default_factory=lambda: ["*"])
+    expires_at: Optional[float] = None
+    expires_at_iso: Optional[str] = None
+
+
+class ExternalApiKeyUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    model_permissions: Optional[List[str]] = None
+    expires_at: Optional[float] = None
+    expires_at_iso: Optional[str] = None
+    clear_expires_at: bool = False
+    active: Optional[bool] = None
+
+
 @router.post("/auth/verify", dependencies=[])
 async def verify_token(req: TokenRequest):
     """Verify panel token (no auth required - this IS the auth endpoint)."""
@@ -87,6 +252,60 @@ async def verify_token(req: TokenRequest):
     if secrets.compare_digest(req.token, stored):
         return {"ok": True}
     raise HTTPException(status_code=401, detail="Token 无效")
+
+
+@router.get("/api-keys", dependencies=_deps)
+async def get_api_keys():
+    """List external API keys without exposing plaintext secrets."""
+    return {"api_keys": list_external_api_keys()}
+
+
+@router.post("/api-keys", dependencies=_deps)
+async def add_api_key(req: ExternalApiKeyCreateRequest):
+    """Create an external API key. Plaintext token is returned once."""
+    expires_at = _parse_expires_at(req.expires_at, req.expires_at_iso)
+    created = create_external_api_key(
+        name=req.name,
+        model_permissions=req.model_permissions,
+        expires_at=expires_at,
+    )
+    return {"ok": True, "api_key": created}
+
+
+@router.put("/api-keys/{key_id}", dependencies=_deps)
+async def edit_api_key(key_id: str, req: ExternalApiKeyUpdateRequest):
+    """Update external API key metadata and permissions."""
+    try:
+        expires_marker: Any = ...
+        if req.clear_expires_at:
+            expires_marker = None
+        elif req.expires_at is not None or req.expires_at_iso:
+            expires_marker = _parse_expires_at(req.expires_at, req.expires_at_iso)
+
+        updated = update_external_api_key(
+            key_id,
+            name=req.name,
+            model_permissions=req.model_permissions,
+            expires_at=expires_marker,
+            active=req.active,
+        )
+        return {"ok": True, "api_key": updated}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="API Key 不存在")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@router.delete("/api-keys/{key_id}", dependencies=_deps)
+async def remove_api_key(key_id: str):
+    """Deactivate an external API key."""
+    try:
+        delete_external_api_key(key_id)
+        return {"ok": True}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="API Key 不存在")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 # ── Status ────────────────────────────────────────────────────────────────────
@@ -397,6 +616,198 @@ async def reload_config():
     except Exception:
         pass
     return {"ok": True, "reloaded": reloaded}
+
+
+# ── 旁路模型路由器配置 ─────────────────────────────────────────────────────────
+
+class BypassRouterConfig(BaseModel):
+    enabled: bool = False
+    routing_model: str = ""
+    routing_rules: str = "根据任务类型选择最合适的模型"
+    routing_prompt: Optional[str] = None
+    compress_prompt: Optional[str] = None
+    timeout_ms: int = 3000
+    compress_context_threshold: int = 10
+
+
+@router.get("/bypass-router", dependencies=_deps)
+async def get_bypass_router_config():
+    """获取旁路模型路由器配置。"""
+    config = _load_yaml(_get_config_dir() / "config.yaml")
+    defaults: Dict[str, Any] = {
+        "enabled": False,
+        "routing_model": "",
+        "routing_rules": "根据任务类型选择最合适的模型",
+        "timeout_ms": 3000,
+        "compress_context_threshold": 10,
+    }
+    return {**defaults, **config.get("bypass_router", {})}
+
+
+@router.put("/bypass-router", dependencies=_deps)
+async def update_bypass_router_config(req: BypassRouterConfig):
+    """更新旁路模型路由器配置并热重载。"""
+    config_file = _get_config_dir() / "config.yaml"
+    config = _load_yaml(config_file)
+    new_cfg: Dict[str, Any] = {
+        "enabled": req.enabled,
+        "routing_model": req.routing_model,
+        "routing_rules": req.routing_rules,
+        "timeout_ms": req.timeout_ms,
+        "compress_context_threshold": req.compress_context_threshold,
+    }
+    if req.routing_prompt:
+        new_cfg["routing_prompt"] = req.routing_prompt
+    if req.compress_prompt:
+        new_cfg["compress_prompt"] = req.compress_prompt
+    config["bypass_router"] = new_cfg
+    _save_yaml(config_file, config)
+    # 热重载
+    try:
+        from bridge_server.services.bypass_router import BypassRouter as _BR
+        from bridge_server.services.bypass_router import get_bypass_router as _get_br
+        from bridge_server.services.bypass_router import set_bypass_router as _set_br
+        existing = _get_br()
+        if existing is not None:
+            existing.reload(new_cfg)
+        else:
+            _set_br(_BR(new_cfg))
+    except Exception:
+        pass
+    return {"ok": True}
+
+
+class BypassRouterTestRequest(BaseModel):
+    messages: List[Dict[str, Any]] = Field(
+        default=[{"role": "user", "content": "帮我写一个 Python 快速排序算法"}]
+    )
+
+
+@router.post("/bypass-router/test", dependencies=_deps)
+async def test_bypass_router(req: BypassRouterTestRequest):
+    """使用当前配置对给定消息执行一次旁路路由测试。"""
+    try:
+        from bridge_server import runtime as _rt
+        from bridge_server.services.bypass_router import get_bypass_router as _get_br
+        br = _get_br()
+        if br is None:
+            return {"ok": False, "error": "旁路路由器未初始化"}
+        if not br.enabled:
+            return {"ok": False, "error": "旁路路由器未启用，请先在配置中开启"}
+        if _rt.provider_manager is None:
+            return {"ok": False, "error": "ProviderManager 未初始化"}
+        result, compressed_msgs = await br.route(req.messages, _rt.provider_manager)
+        if result is None:
+            return {"ok": False, "error": "路由决策失败（模型未响应或响应格式无效）"}
+        return {
+            "ok": True,
+            "selected_model": f"{result.provider_id}/{result.model}",
+            "reason": result.reason,
+            "context_compressed": len(compressed_msgs) < len(req.messages),
+            "original_message_count": len(req.messages),
+            "compressed_message_count": len(compressed_msgs),
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+# ── Expression Router (Layer 2) ───────────────────────────────────────────────
+
+class ExpressionRuleModel(BaseModel):
+    expr: str
+    model: str
+    reason: str = "表达式路由"
+    priority: int = 0
+
+
+class ExpressionRouterConfig(BaseModel):
+    enabled: bool = False
+    rules: List[ExpressionRuleModel] = Field(default_factory=list)
+
+
+@router.get("/expression-router", dependencies=_deps)
+async def get_expression_router_config():
+    """获取表达式路由器配置。"""
+    config = _load_yaml(_get_config_dir() / "config.yaml")
+    defaults: Dict[str, Any] = {"enabled": False, "rules": []}
+    return {**defaults, **config.get("expression_router", {})}
+
+
+@router.put("/expression-router", dependencies=_deps)
+async def update_expression_router_config(req: ExpressionRouterConfig):
+    """更新表达式路由器配置并热重载。验证所有表达式的安全性。"""
+    from bridge_server.services.expression_router import validate_expression
+
+    errors = []
+    for i, rule in enumerate(req.rules):
+        err = validate_expression(rule.expr)
+        if err:
+            errors.append(f"规则 {i+1} 表达式无效: {err}")
+    if errors:
+        raise HTTPException(status_code=400, detail={"errors": errors})
+
+    new_cfg: Dict[str, Any] = {
+        "enabled": req.enabled,
+        "rules": [r.model_dump() for r in req.rules],
+    }
+    config_file = _get_config_dir() / "config.yaml"
+    config = _load_yaml(config_file)
+    config["expression_router"] = new_cfg
+    _save_yaml(config_file, config)
+
+    try:
+        from bridge_server.services.expression_router import (
+            ExpressionRouter as _ER,
+            get_expression_router as _get_er,
+            set_expression_router as _set_er,
+        )
+        existing = _get_er()
+        if existing is not None:
+            existing.reload(new_cfg)
+        else:
+            _set_er(_ER(new_cfg))
+    except Exception:
+        pass
+
+    return {"ok": True}
+
+
+class ExpressionRouterTestRequest(BaseModel):
+    message: str = "帮我写一个 Python 快速排序算法"
+
+
+@router.post("/expression-router/test", dependencies=_deps)
+async def test_expression_router(req: ExpressionRouterTestRequest):
+    """对指定消息运行当前表达式路由规则，返回匹配结果。"""
+    try:
+        from bridge_server.services.expression_router import get_expression_router as _get_er
+        er = _get_er()
+        if er is None:
+            return {"ok": False, "error": "表达式路由器未初始化"}
+        if not er.enabled:
+            return {"ok": False, "error": "表达式路由器未启用，请先在配置中开启"}
+        result = er.route(req.message)
+        if result is None:
+            return {"ok": True, "matched": False, "message": "无规则匹配，将降级到下一层路由"}
+        provider_id, model_id, reason = result
+        return {
+            "ok": True,
+            "matched": True,
+            "selected_model": f"{provider_id}/{model_id}",
+            "reason": reason,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@router.get("/expression-router/validate", dependencies=_deps)
+async def validate_expression_route(expr: str = Query(..., description="要验证的表达式字符串")):
+    """验证单条表达式的安全性和语法。"""
+    from bridge_server.services.expression_router import validate_expression
+    err = validate_expression(expr)
+    if err:
+        return {"valid": False, "error": err}
+    return {"valid": True}
 
 
 # ── Usage ─────────────────────────────────────────────────────────────────────
@@ -720,3 +1131,483 @@ async def get_logs(n: int = Query(100, le=500)):
         return {"lines": []}
     lines = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
     return {"lines": lines[-n:]}
+
+
+# ── Custom Router Management ──────────────────────────────────────────────────
+
+class RouterImportRequest(BaseModel):
+    path: str  # 本地目录路径或 .bspkg 文件路径
+
+
+class RouterActivateRequest(BaseModel):
+    name: str
+
+
+class RouterTestRequest(BaseModel):
+    name: str
+    message: str = "帮我写一个快速排序算法"
+
+
+def _get_registry():
+    """获取 RouterRegistry 单例（runtime 启动后可用）。"""
+    try:
+        from bridge_server.services.router_registry import get_router_registry
+        reg = get_router_registry()
+        if reg is None:
+            raise HTTPException(status_code=503, detail="RouterRegistry 未初始化")
+        return reg
+    except ImportError:
+        raise HTTPException(status_code=503, detail="RouterRegistry 模块不可用")
+
+
+@router.get("/router/list", dependencies=_deps)
+async def list_routers():
+    """列出所有已安装的自定义路由器。"""
+    reg = _get_registry()
+    return {"routers": reg.list_routers(), "active": reg.get_active()}
+
+
+@router.get("/router/active", dependencies=_deps)
+async def get_active_router():
+    """获取当前激活的路由器名称（null 表示使用内置路由）。"""
+    reg = _get_registry()
+    return {"active": reg.get_active()}
+
+
+@router.post("/router/import", dependencies=_deps)
+async def import_router(req: RouterImportRequest):
+    """从本地路径安装路由器（目录或 .bspkg 文件）。"""
+    reg = _get_registry()
+    src = Path(req.path)
+    if not src.exists():
+        raise HTTPException(status_code=400, detail=f"路径不存在: {req.path}")
+    try:
+        manifest = reg.install(src)
+        return {
+            "ok": True,
+            "name": manifest.name,
+            "version": manifest.version,
+            "description": manifest.description,
+        }
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.put("/router/activate", dependencies=_deps)
+async def activate_router(req: RouterActivateRequest):
+    """激活指定路由器（替换当前激活的路由器）。"""
+    reg = _get_registry()
+    try:
+        reg.activate(req.name)
+        return {"ok": True, "active": req.name}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/router/deactivate", dependencies=_deps)
+async def deactivate_router():
+    """停用自定义路由器，回退到内置 SmartRouter。"""
+    reg = _get_registry()
+    reg.deactivate()
+    return {"ok": True, "active": None}
+
+
+@router.post("/router/rollback/{name}", dependencies=_deps)
+async def rollback_router(name: str):
+    """将指定路由器回滚到上一个版本（需要之前有备份）。"""
+    reg = _get_registry()
+    try:
+        reg.rollback(name)
+        return {"ok": True, "message": f"路由器 '{name}' 已回滚到上一个版本"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/router/{name}", dependencies=_deps)
+async def remove_router(name: str):
+    """卸载指定路由器（不可撤销）。"""
+    reg = _get_registry()
+    try:
+        reg.remove(name)
+        return {"ok": True, "message": f"路由器 '{name}' 已卸载"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/router/test", dependencies=_deps)
+async def test_router(req: RouterTestRequest):
+    """测试路由器：使用指定消息运行路由，返回决策结果和耗时。"""
+    reg = _get_registry()
+    try:
+        from bridge_server.services.model_info import get_model_info_aggregator
+        from bridge_server.router_sdk import RoutingContext
+
+        agg = get_model_info_aggregator()
+        model_list = agg.get_snapshot() if agg else []
+        ctx = RoutingContext(
+            last_user_message=req.message,
+            messages_count=1,
+            models=model_list,
+        )
+        result = await reg.test_router(req.name, ctx)
+        return result
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"路由器 '{req.name}' 未安装")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Benchmark ─────────────────────────────────────────────────────────────────
+
+_BENCHMARK_QUESTIONS: Dict[str, List[Dict]] = {
+    "coding": [
+        {
+            "id": "code_1",
+            "prompt": "用Python实现一个二分查找函数，要求：函数签名为 binary_search(arr, target)，包含详细注释，并给出时间复杂度。",
+            "check": lambda r: bool(_re.search(r"def binary_search", r) and ("O(" in r or "时间复杂度" in r)),
+        },
+        {
+            "id": "code_2",
+            "prompt": "写一段JavaScript代码，使用Promise实现一个带超时控制的fetch请求（超时3秒自动拒绝），并加注释。",
+            "check": lambda r: bool(_re.search(r"Promise|fetch|timeout|setTimeout", r, _re.I)),
+        },
+        {
+            "id": "code_3",
+            "prompt": "请找出以下Python代码中的bug并修复：\n```python\ndef find_max(lst):\n    max_val = lst[0]\n    for i in range(len(lst)):\n        if lst[i] > max_val:\n            max_val = lst[i+1]\n    return max_val\n```",
+            "check": lambda r: bool(_re.search(r"lst\[i\]|索引越界|index|bug|修复|错误", r, _re.I)),
+        },
+    ],
+    "math": [
+        {
+            "id": "math_1",
+            "prompt": "一列火车从A城出发，速度60km/h，同时另一列火车从B城出发，速度90km/h，两城相距600km，两车相向而行，请问几小时后相遇？给出完整解题过程。",
+            "check": lambda r: bool(_re.search(r"4\s*小时|4h|4\s*hour", r, _re.I) or "4" in r),
+        },
+        {
+            "id": "math_2",
+            "prompt": "已知等差数列首项a₁=2，公差d=3，求第15项和前15项之和，请给出推导步骤。",
+            "check": lambda r: bool(_re.search(r"44", r) and _re.search(r"345", r)),
+        },
+        {
+            "id": "math_3",
+            "prompt": "用数学归纳法证明：对所有正整数n，1+2+3+...+n = n(n+1)/2",
+            "check": lambda r: bool(_re.search(r"归纳|induction|k\+1|假设|成立", r, _re.I)),
+        },
+    ],
+    "writing": [
+        {
+            "id": "write_1",
+            "prompt": "以「第一场雪」为题，写一段200字左右的散文，要求意境优美，有具体的场景描写。",
+            "check": lambda r: len(r) >= 100,
+        },
+        {
+            "id": "write_2",
+            "prompt": "帮我写一封给领导申请居家办公的邮件，原因是家中有老人生病需要照料，语气正式但不失人情味，不超过150字。",
+            "check": lambda r: bool(_re.search(r"申请|敬请|居家|审批|办公|领导|尊敬", r)),
+        },
+        {
+            "id": "write_3",
+            "prompt": "为一款主打「极简主义」风格的蓝牙耳机写一段产品介绍文案（80字以内），突出设计感和音质。",
+            "check": lambda r: 20 <= len(r) <= 300,
+        },
+    ],
+    "translation": [
+        {
+            "id": "trans_1",
+            "prompt": '将以下古文翻译成现代英文：\n"知之者不如好之者，好之者不如乐之者。"（出自《论语》）\n请同时给出字面意思和引申义。',
+            "check": lambda r: bool(_re.search(r"know|learn|enjoy|love|delight|pleasure", r, _re.I)),
+        },
+        {
+            "id": "trans_2",
+            "prompt": '将以下英文段落翻译成流畅的中文：\n"Artificial intelligence is transforming every industry, from healthcare to finance, creating both unprecedented opportunities and significant challenges for society."',
+            "check": lambda r: bool(_re.search(r"人工智能|医疗|金融|机遇|挑战", r)),
+        },
+        {
+            "id": "trans_3",
+            "prompt": "请将以下句子分别翻译成日语和法语：\n「春天来了，万物复苏。」",
+            "check": lambda r: bool(_re.search(r"春|printemps|春が|haru", r, _re.I)),
+        },
+    ],
+    "chat": [
+        {
+            "id": "chat_1",
+            "prompt": "我最近工作压力很大，经常失眠，有什么实用的放松建议？",
+            "check": lambda r: len(r) >= 80 and bool(_re.search(r"放松|呼吸|运动|睡眠|休息|建议", r)),
+        },
+        {
+            "id": "chat_2",
+            "prompt": "如果你是一种天气，你会是什么天气？为什么？（请给出有趣且有深度的回答）",
+            "check": lambda r: len(r) >= 50,
+        },
+        {
+            "id": "chat_3",
+            "prompt": "我朋友说「人生苦短，及时行乐」，我觉得这句话有点问题，你怎么看？",
+            "check": lambda r: bool(_re.search(r"但|然而|不过|另一方面|平衡|责任|意义|价值", r)),
+        },
+    ],
+}
+
+_BENCHMARK_DIMENSION_NAMES: Dict[str, str] = {
+    "coding":      "💻 代码编程",
+    "math":        "🔢 数学推理",
+    "writing":     "✍️ 文学创作",
+    "translation": "🌐 语言翻译",
+    "chat":        "💬 日常对话",
+}
+
+_BENCHMARK_QUESTIONS_PER_DIM = 3
+_BENCHMARK_TOKENS_PER_CALL = 750
+_BENCHMARK_SECS_PER_CALL = 6  # conservative estimate
+
+# In-memory task store: task_id -> task_state_dict
+_benchmark_tasks: Dict[str, Dict[str, Any]] = {}
+
+
+def _benchmark_stars(score: int) -> str:
+    s = round(score / 20)
+    return "★" * s + "☆" * (5 - s)
+
+
+def _score_benchmark_response(content: str, latency: float, check_fn, error: str) -> Dict[str, Any]:
+    if error:
+        return {"score": 0, "quality": False, "latency": latency, "error": error}
+    quality = bool(check_fn(content))
+    q_score = 40 if quality else 0
+    length = len(content)
+    l_score = min(30, int(length / 500 * 30)) if length >= 20 else 0
+    speed = max(0, 30 - int((latency - 5) / 85 * 30)) if latency > 5 else 30
+    return {
+        "score": q_score + l_score + speed,
+        "quality": quality,
+        "latency": round(latency, 1),
+        "length": length,
+        "error": "",
+    }
+
+
+async def _call_benchmark_model(
+    base_url: str, api_key: str, model_id: str, prompt: str, timeout: int = 60
+) -> Tuple[str, float, str]:
+    """Async model call for benchmark. Returns (content, latency_sec, error)."""
+    url = base_url.rstrip("/")
+    if not url.endswith("/chat/completions"):
+        url += "/chat/completions"
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    payload = {
+        "model": model_id,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 1000,
+        "temperature": 0.7,
+    }
+    t0 = time.perf_counter()
+    try:
+        async with httpx.AsyncClient(timeout=timeout, verify=False) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+        latency = time.perf_counter() - t0
+        resp.raise_for_status()
+        data = resp.json()
+        msg = data["choices"][0]["message"]
+        content = msg.get("content") or msg.get("reasoning_content") or ""
+        return content.strip(), latency, ""
+    except httpx.TimeoutException:
+        return "", time.perf_counter() - t0, f"超时（>{timeout}s）"
+    except Exception as e:
+        return "", time.perf_counter() - t0, str(e)[:120]
+
+
+async def _run_benchmark_task(
+    task_id: str,
+    models: List[Tuple[str, str, str, str]],  # (provider_name, model_id, base_url, api_key)
+    dimensions: List[str],
+) -> None:
+    """Background task: run benchmark and update _benchmark_tasks[task_id] in-place."""
+    task = _benchmark_tasks[task_id]
+    task["status"] = "running"
+    total_calls = len(models) * len(dimensions) * _BENCHMARK_QUESTIONS_PER_DIM
+    done = 0
+    results: Dict[str, Any] = {}
+
+    try:
+        for provider_name, model_id, base_url, api_key in models:
+            model_key = f"{provider_name}/{model_id}"
+            results[model_key] = {}
+
+            for dim in dimensions:
+                questions = _BENCHMARK_QUESTIONS[dim][:_BENCHMARK_QUESTIONS_PER_DIM]
+                dim_scores = []
+
+                for q in questions:
+                    task["current_step"] = (
+                        f"{model_key}  ·  {_BENCHMARK_DIMENSION_NAMES.get(dim, dim)}  ·  {q['id']}"
+                    )
+                    content, latency, error = await _call_benchmark_model(
+                        base_url, api_key, model_id, q["prompt"]
+                    )
+                    score_info = _score_benchmark_response(content, latency, q["check"], error)
+                    dim_scores.append(score_info)
+                    done += 1
+                    task["progress"] = int(done / total_calls * 100)
+
+                avg_score = (
+                    int(sum(r["score"] for r in dim_scores) / len(dim_scores))
+                    if dim_scores else 0
+                )
+                avg_latency = (
+                    round(sum(r["latency"] for r in dim_scores) / len(dim_scores), 1)
+                    if dim_scores else 0.0
+                )
+                quality_rate = (
+                    round(sum(1 for r in dim_scores if r["quality"]) / len(dim_scores), 2)
+                    if dim_scores else 0.0
+                )
+                results[model_key][dim] = {
+                    "score": avg_score,
+                    "stars": _benchmark_stars(avg_score),
+                    "quality_rate": quality_rate,
+                    "avg_latency": avg_latency,
+                }
+
+        # Persist results (merge with existing file so previous models are kept)
+        out_file = _get_config_dir() / "benchmark_results.yaml"
+        existing: dict = {}
+        if out_file.exists():
+            with open(out_file, encoding="utf-8") as f:
+                existing = yaml.safe_load(f) or {}
+        existing.setdefault("results", {}).update(results)
+        existing["generated_at"] = datetime.now().isoformat()
+        existing["dimensions"] = dimensions
+        with open(out_file, "w", encoding="utf-8") as f:
+            yaml.dump(existing, f, allow_unicode=True, default_flow_style=False)
+
+        task["status"] = "done"
+        task["results"] = results
+        task["progress"] = 100
+        task["current_step"] = "测试完成"
+
+    except Exception as e:
+        task["status"] = "error"
+        task["error"] = str(e)
+        task["current_step"] = ""
+
+
+class BenchmarkStartRequest(BaseModel):
+    provider_name: str
+    model_ids: Optional[List[str]] = None   # None = all models in provider
+    dimensions: Optional[List[str]] = None  # None = all dimensions
+
+
+@router.get("/benchmark/info", dependencies=_deps)
+async def get_benchmark_info():
+    """Return benchmark dimension descriptions and estimation constants."""
+    return {
+        "dimensions": _BENCHMARK_DIMENSION_NAMES,
+        "questions_per_dim": _BENCHMARK_QUESTIONS_PER_DIM,
+        "tokens_per_call": _BENCHMARK_TOKENS_PER_CALL,
+        "secs_per_call": _BENCHMARK_SECS_PER_CALL,
+    }
+
+
+@router.post("/benchmark/start", dependencies=_deps)
+async def start_benchmark(req: BenchmarkStartRequest, background_tasks: BackgroundTasks):
+    """Start an async benchmark task for one provider's models."""
+    config = _load_yaml(_get_config_dir() / "config.yaml")
+    provider = next(
+        (p for p in config.get("providers", []) if p.get("name") == req.provider_name),
+        None,
+    )
+    if not provider:
+        raise HTTPException(status_code=404, detail=f"Provider '{req.provider_name}' 不存在")
+
+    base_url = provider.get("base_url", "")
+    auth_type = provider.get("auth_type", "api_key")
+
+    # Resolve API key / bearer token
+    if auth_type == "oauth":
+        api_key = ""
+        try:
+            from bridge_server.providers.oauth_manager import OAuthManager
+            mgr = OAuthManager(provider.get("oauth", {}))
+            api_key = await mgr.get_token()
+        except Exception:
+            pass
+    else:
+        env_var = provider.get("api_key_env", "")
+        env_file = _get_config_dir() / ".env"
+        if env_file.exists():
+            for line in env_file.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    os.environ.setdefault(k.strip(), v.strip())
+        api_key = os.environ.get(env_var, "") or provider.get("api_key", "")
+
+    if not api_key:
+        raise HTTPException(status_code=422, detail="无法获取 API Key，请检查配置")
+
+    # Resolve model list
+    all_model_ids = [
+        (m.get("id") if isinstance(m, dict) else str(m))
+        for m in provider.get("models", [])
+    ]
+    model_ids = req.model_ids if req.model_ids else all_model_ids
+    model_ids = [m for m in model_ids if m in all_model_ids]
+    if not model_ids:
+        raise HTTPException(status_code=422, detail="没有有效的模型 ID")
+
+    dimensions = req.dimensions if req.dimensions else list(_BENCHMARK_QUESTIONS.keys())
+    dimensions = [d for d in dimensions if d in _BENCHMARK_QUESTIONS]
+    if not dimensions:
+        raise HTTPException(status_code=422, detail="没有有效的测试维度")
+
+    total_calls = len(model_ids) * len(dimensions) * _BENCHMARK_QUESTIONS_PER_DIM
+    est_tokens = total_calls * _BENCHMARK_TOKENS_PER_CALL
+    est_minutes = round(total_calls * _BENCHMARK_SECS_PER_CALL / 60, 1)
+
+    task_id = secrets.token_hex(8)
+    _benchmark_tasks[task_id] = {
+        "status": "pending",
+        "progress": 0,
+        "current_step": "等待启动…",
+        "results": None,
+        "error": None,
+        "provider_name": req.provider_name,
+        "model_ids": model_ids,
+        "dimensions": dimensions,
+        "total_calls": total_calls,
+    }
+
+    models_tuples = [
+        (req.provider_name, mid, base_url, api_key) for mid in model_ids
+    ]
+    background_tasks.add_task(_run_benchmark_task, task_id, models_tuples, dimensions)
+
+    return {
+        "task_id": task_id,
+        "estimated_calls": total_calls,
+        "estimated_tokens": est_tokens,
+        "estimated_minutes": est_minutes,
+        "model_ids": model_ids,
+        "dimensions": dimensions,
+    }
+
+
+@router.get("/benchmark/status/{task_id}", dependencies=_deps)
+async def get_benchmark_status(task_id: str):
+    """Poll the status of a running benchmark task."""
+    task = _benchmark_tasks.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task 不存在或已过期")
+    return task
+
+
+@router.get("/benchmark/results", dependencies=_deps)
+async def get_benchmark_results():
+    """Return the last saved benchmark results file."""
+    out_file = _get_config_dir() / "benchmark_results.yaml"
+    if not out_file.exists():
+        return {"results": {}, "generated_at": None, "dimensions": []}
+    with open(out_file, encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    return data
