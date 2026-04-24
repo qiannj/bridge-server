@@ -43,6 +43,7 @@ CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 CODEX_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
 CODEX_OAUTH_DEVICE_ISSUER = "https://auth.openai.com"
 CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
+CODEX_CLIENT_VERSION = "1.0.0"
 
 
 # ── Benchmark 常量 ─────────────────────────────────────────────────────────────
@@ -598,7 +599,12 @@ class SetupWizard:
                 return
 
         # 配置模型
-        models = self._add_models_loop(provider)
+        models = self._add_models_loop(
+            provider,
+            auth_type=auth_type,
+            oauth_cfg=oauth_cfg if auth_type in {"oauth", "openai_codex"} else None,
+            api_key=api_key if auth_type == "api_key" else None,
+        )
         if not models:
             print(f"{Colors.RED}❌ 至少添加一个模型{Colors.ENDC}")
             return
@@ -768,15 +774,127 @@ class SetupWizard:
                 self.config['providers'].append(provider_config)
                 print(f"{Colors.YELLOW}⚠️  {name} 已强制保存（连接未验证）{Colors.ENDC}")
     
-    def _add_models_loop(self, provider: Provider) -> List[Dict]:
+    def _normalize_dynamic_model(self, raw: Dict[str, Any]) -> Optional[Model]:
+        """Normalize remote-discovered model metadata into the local Model shape."""
+        model_id = str(raw.get("slug") or raw.get("id") or "").strip()
+        if not model_id:
+            return None
+
+        visibility = str(raw.get("visibility") or "").strip().lower()
+        if visibility and visibility not in {"list", "default", "public"}:
+            return None
+        if raw.get("supported_in_api") is False:
+            return None
+
+        display_name = str(raw.get("display_name") or raw.get("name") or model_id).strip()
+        description = str(raw.get("description") or "动态发现的远端模型").strip()
+        context_length = int(raw.get("context_window") or raw.get("max_context_window") or 0)
+        truncation = raw.get("truncation_policy") or {}
+        max_output_tokens = int(truncation.get("limit") or raw.get("max_output_tokens") or 0)
+
+        capabilities: List[str] = []
+        for modality in raw.get("input_modalities") or []:
+            text = str(modality).strip()
+            if text:
+                capabilities.append(text)
+        if raw.get("supported_reasoning_levels"):
+            capabilities.append("reasoning")
+
+        return Model(
+            id=model_id,
+            name=display_name,
+            description=description,
+            context_length=context_length,
+            max_output_tokens=max_output_tokens,
+            pricing=None,
+            capabilities=capabilities,
+            provider="openai",
+        )
+
+    def _fetch_openai_codex_models(
+        self,
+        oauth_cfg: Dict[str, Any],
+        base_url: str = CODEX_BASE_URL,
+    ) -> List[Model]:
+        """Fetch the model catalog from the Codex backend for browser-auth sessions."""
+        token = self._fetch_oauth_token(oauth_cfg)
+        if not token:
+            return []
+
+        base = (base_url or CODEX_BASE_URL).rstrip("/")
+        url = f"{base}/models"
+        print(f"  🔍 正在从远端拉取模型目录：GET {url}?client_version={CODEX_CLIENT_VERSION}")
+        try:
+            response = httpx.get(
+                url,
+                params={"client_version": CODEX_CLIENT_VERSION},
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/json",
+                    "User-Agent": "BridgeServer/2.0",
+                },
+                timeout=20,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as exc:
+            print(f"  {Colors.YELLOW}⚠️  动态拉取模型目录失败，回退到本地预设：{exc}{Colors.ENDC}")
+            return []
+
+        raw_models = payload.get("models") or []
+        models: List[Model] = []
+        seen_ids = set()
+        for raw in raw_models:
+            if not isinstance(raw, dict):
+                continue
+            model = self._normalize_dynamic_model(raw)
+            if not model or model.id in seen_ids:
+                continue
+            seen_ids.add(model.id)
+            models.append(model)
+
+        if models:
+            print(f"  {Colors.GREEN}✓ 已从远端拉取 {len(models)} 个可用模型{Colors.ENDC}")
+        else:
+            print(f"  {Colors.YELLOW}⚠️  远端未返回可展示模型，回退到本地预设{Colors.ENDC}")
+        return models
+
+    def _resolve_models_for_selection(
+        self,
+        provider: Provider,
+        auth_type: str = "api_key",
+        oauth_cfg: Optional[Dict[str, Any]] = None,
+        api_key: Optional[str] = None,
+    ) -> Tuple[List[Model], str]:
+        """Return model choices plus a user-facing source label."""
+        provider_models = list(provider.models.values()) if isinstance(provider.models, dict) else list(provider.models)
+
+        if auth_type == "openai_codex" and oauth_cfg:
+            base_url = str(oauth_cfg.get("base_url") or getattr(provider, "base_url", "") or CODEX_BASE_URL)
+            dynamic_models = self._fetch_openai_codex_models(oauth_cfg, base_url=base_url)
+            if dynamic_models:
+                return dynamic_models, "远端实时返回"
+            return provider_models, "本地预设（动态拉取失败后回退）"
+
+        return provider_models, "本地预设"
+
+    def _add_models_loop(
+        self,
+        provider: Provider,
+        auth_type: str = "api_key",
+        oauth_cfg: Optional[Dict[str, Any]] = None,
+        api_key: Optional[str] = None,
+    ) -> List[Dict]:
         """循环添加模型"""
         print(f"\n{provider.name} 可用模型:")
-        
-        # 获取模型列表
-        if isinstance(provider.models, dict):
-            models_list = list(provider.models.values())
-        else:
-            models_list = provider.models
+
+        models_list, source_label = self._resolve_models_for_selection(
+            provider,
+            auth_type=auth_type,
+            oauth_cfg=oauth_cfg,
+            api_key=api_key,
+        )
+        print(f"  来源：{source_label}")
         
         # 显示前 20 个模型
         for i, m in enumerate(models_list[:20], 1):
@@ -802,11 +920,11 @@ class SetupWizard:
                 if 0 <= idx < len(models_list):
                     model = models_list[idx]
                     models.append({
-                        'id': model.name,
+                        'id': model.id,
                         'name': model.name,
                         'priority': model_idx
                     })
-                    print(f"    ✓ 已添加：{model.name}")
+                    print(f"    ✓ 已添加：{model.name} ({model.id})")
                 else:
                     print(f"    {Colors.RED}无效编号{Colors.ENDC}")
             else:
@@ -1251,7 +1369,7 @@ class SetupWizard:
             return False
         return self._test_provider_connection(base_url, token, model_id)
 
-
+    def _save_env_var(self, name: str, value: str):
         """保存环境变量到 .env 文件"""
         env_content = {}
         if self.env_path.exists():

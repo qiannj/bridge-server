@@ -4,6 +4,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -164,7 +165,13 @@ def test_add_preset_openai_codex_provider_uses_codex_runtime_base_url(wizard, mo
             "base_url": "https://chatgpt.com/backend-api/codex",
         },
     )
-    monkeypatch.setattr(wizard, "_add_models_loop", lambda provider: [{"id": "codex-mini-latest", "name": "codex-mini-latest"}])
+    monkeypatch.setattr(
+        wizard,
+        "_add_models_loop",
+        lambda provider, auth_type="api_key", oauth_cfg=None, api_key=None: [
+            {"id": "codex-mini-latest", "name": "codex-mini-latest"}
+        ],
+    )
     seen = {}
     monkeypatch.setattr(
         wizard,
@@ -182,6 +189,118 @@ def test_add_preset_openai_codex_provider_uses_codex_runtime_base_url(wizard, mo
     provider_cfg = wizard.config["providers"][0]
     assert seen["test_base_url"] == "https://chatgpt.com/backend-api/codex"
     assert provider_cfg["base_url"] == "https://chatgpt.com/backend-api/codex"
+
+
+def test_add_models_loop_uses_dynamic_codex_models_and_keeps_slug(wizard, monkeypatch, capsys):
+    provider = type(
+        "Provider",
+        (),
+        {
+            "id": "openai",
+            "name": "OpenAI",
+            "models": [],
+        },
+    )()
+    dynamic_models = [
+        SimpleNamespace(id="gpt-5.4", name="gpt-5.4", pricing=None, context_length=272000),
+        SimpleNamespace(id="gpt-5.4-mini", name="gpt-5.4-mini", pricing=None, context_length=400000),
+    ]
+    monkeypatch.setattr(
+        wizard,
+        "_resolve_models_for_selection",
+        lambda provider, auth_type="api_key", oauth_cfg=None, api_key=None: (dynamic_models, "远端实时返回"),
+    )
+    answers = iter(["1", ""])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+
+    models = wizard._add_models_loop(
+        provider,
+        auth_type="openai_codex",
+        oauth_cfg={"provider": "openai_codex"},
+    )
+
+    output = capsys.readouterr().out
+    assert "来源：远端实时返回" in output
+    assert models == [{"id": "gpt-5.4", "name": "gpt-5.4", "priority": 1}]
+
+
+def test_fetch_openai_codex_models_normalizes_response(setup_module, wizard, monkeypatch):
+    monkeypatch.setattr(wizard, "_fetch_oauth_token", lambda oauth_cfg: "access-token")
+
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "models": [
+                    {
+                        "slug": "gpt-5.4",
+                        "display_name": "GPT-5.4",
+                        "description": "Coding model",
+                        "context_window": 272000,
+                        "truncation_policy": {"limit": 10000},
+                        "input_modalities": ["text", "image"],
+                        "supported_reasoning_levels": [{"effort": "medium"}],
+                        "visibility": "list",
+                        "supported_in_api": True,
+                    },
+                    {
+                        "slug": "hidden-model",
+                        "display_name": "Hidden",
+                        "visibility": "internal",
+                    },
+                ]
+            }
+
+    captured = {}
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        captured["url"] = url
+        captured["params"] = params
+        captured["headers"] = headers
+        return Response()
+
+    monkeypatch.setattr(setup_module.httpx, "get", fake_get)
+
+    models = wizard._fetch_openai_codex_models(
+        {"provider": "openai_codex", "auth_store_key": "OpenAI"},
+        base_url="https://chatgpt.com/backend-api/codex",
+    )
+
+    assert captured["url"] == "https://chatgpt.com/backend-api/codex/models"
+    assert captured["params"] == {"client_version": setup_module.CODEX_CLIENT_VERSION}
+    assert captured["headers"]["Authorization"] == "Bearer access-token"
+    assert [m.id for m in models] == ["gpt-5.4"]
+    assert models[0].name == "GPT-5.4"
+    assert models[0].context_length == 272000
+    assert models[0].max_output_tokens == 10000
+    assert "reasoning" in models[0].capabilities
+
+
+def test_resolve_models_for_selection_falls_back_to_registry_when_dynamic_fetch_fails(wizard, monkeypatch):
+    provider = type(
+        "Provider",
+        (),
+        {
+            "models": [
+                SimpleNamespace(id="gpt-4o", name="GPT-4o", pricing=None, context_length=128000),
+            ],
+            "base_url": "https://api.openai.com/v1",
+        },
+    )()
+    monkeypatch.setattr(wizard, "_fetch_openai_codex_models", lambda oauth_cfg, base_url="": [])
+
+    models, source = wizard._resolve_models_for_selection(
+        provider,
+        auth_type="openai_codex",
+        oauth_cfg={"provider": "openai_codex", "base_url": "https://chatgpt.com/backend-api/codex"},
+    )
+
+    assert source == "本地预设（动态拉取失败后回退）"
+    assert [m.id for m in models] == ["gpt-4o"]
 
 
 def test_auth_store_is_written_as_json(wizard):
