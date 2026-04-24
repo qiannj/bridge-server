@@ -61,6 +61,7 @@ from .router_sdk import RoutingContext, RoutingDecision
 from .utils.cache import HybridCache
 from .utils.connection_pools import close_connection_pool_manager, get_connection_pool_manager
 from .services.bypass_router import BypassRouter, get_bypass_router, set_bypass_router
+from .services.expression_router import ExpressionRouter, get_expression_router, set_expression_router
 
 # 异步模块
 from .auth import get_auth_manager, get_current_user_async, AsyncAuthManager
@@ -81,6 +82,7 @@ auth_manager: Optional[AsyncAuthManager] = None
 runtime_config: Dict[str, Any] = {}
 model_info_aggregator: Optional[ModelInfoAggregator] = None
 router_registry_instance: Optional[RouterRegistry] = None
+expression_router_instance: Optional[ExpressionRouter] = None
 
 
 def _resolve_config_dir() -> Path:
@@ -249,7 +251,7 @@ async def load_config_async() -> Dict[str, Any]:
 
 async def initialize_system():
     """初始化系统组件"""
-    global provider_manager, smart_router, cache_system, usage_tracker, auth_manager, connection_pool_manager, runtime_config, model_info_aggregator, router_registry_instance
+    global provider_manager, smart_router, cache_system, usage_tracker, auth_manager, connection_pool_manager, runtime_config, model_info_aggregator, router_registry_instance, expression_router_instance
     
     logger.info("🚀 Bridge Server v2.0 系统初始化...")
     runtime_config = await load_config_async()
@@ -336,6 +338,16 @@ async def initialize_system():
         "旁路模型路由器已初始化",
         enabled=bypass_router_inst.enabled,
         routing_model=bypass_router_inst.routing_model or "(未配置)",
+    )
+
+    # 9. 初始化表达式路由器 (Layer 2)
+    expr_cfg = runtime_config.get("expression_router", {})
+    expression_router_inst = ExpressionRouter(expr_cfg)
+    set_expression_router(expression_router_inst)
+    logger.info(
+        "表达式路由器已初始化",
+        enabled=expression_router_inst.enabled,
+        rules_count=len(expression_router_inst._rules),
     )
 
 
@@ -958,7 +970,37 @@ async def chat_completions(
                 except Exception as _br_exc:
                     logger.warning("bypass_router_error", error=str(_br_exc))
 
-        # 2) 若无直接指定，尝试自定义路由器框架
+        # 2) 表达式路由器 (Layer 2 — 无代码执行风险)
+        if route_result is None:
+            _expr_router = get_expression_router()
+            if _expr_router and _expr_router.enabled:
+                try:
+                    _user_msg = next(
+                        (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
+                        "",
+                    )
+                    _expr_match = _expr_router.route(str(_user_msg))
+                    if _expr_match is not None:
+                        _ep_id, _em_id, _er = _expr_match
+                        from .services.routing.router import RouteResult as _RR
+                        route_result = _RR(
+                            provider_id=_ep_id,
+                            model=_em_id,
+                            task_type="expression",
+                            confidence=0.88,
+                            reason=f"表达式路由: {_er}",
+                            from_cache=False,
+                        )
+                        logger.info(
+                            "expression_router_selected",
+                            provider=_ep_id,
+                            model=_em_id,
+                            reason=_er,
+                        )
+                except Exception as _expr_exc:
+                    logger.warning("expression_router_error", error=str(_expr_exc))
+
+        # 3) 自定义 Python 插件路由器（子进程沙箱执行）
         if route_result is None:
             _registry = get_router_registry()
             _active_router = _registry.get_active() if _registry else None

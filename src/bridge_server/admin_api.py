@@ -711,6 +711,105 @@ async def test_bypass_router(req: BypassRouterTestRequest):
         return {"ok": False, "error": str(e)}
 
 
+# ── Expression Router (Layer 2) ───────────────────────────────────────────────
+
+class ExpressionRuleModel(BaseModel):
+    expr: str
+    model: str
+    reason: str = "表达式路由"
+    priority: int = 0
+
+
+class ExpressionRouterConfig(BaseModel):
+    enabled: bool = False
+    rules: List[ExpressionRuleModel] = Field(default_factory=list)
+
+
+@router.get("/expression-router", dependencies=_deps)
+async def get_expression_router_config():
+    """获取表达式路由器配置。"""
+    config = _load_yaml(_get_config_dir() / "config.yaml")
+    defaults: Dict[str, Any] = {"enabled": False, "rules": []}
+    return {**defaults, **config.get("expression_router", {})}
+
+
+@router.put("/expression-router", dependencies=_deps)
+async def update_expression_router_config(req: ExpressionRouterConfig):
+    """更新表达式路由器配置并热重载。验证所有表达式的安全性。"""
+    from bridge_server.services.expression_router import validate_expression
+
+    errors = []
+    for i, rule in enumerate(req.rules):
+        err = validate_expression(rule.expr)
+        if err:
+            errors.append(f"规则 {i+1} 表达式无效: {err}")
+    if errors:
+        raise HTTPException(status_code=400, detail={"errors": errors})
+
+    new_cfg: Dict[str, Any] = {
+        "enabled": req.enabled,
+        "rules": [r.model_dump() for r in req.rules],
+    }
+    config_file = _get_config_dir() / "config.yaml"
+    config = _load_yaml(config_file)
+    config["expression_router"] = new_cfg
+    _save_yaml(config_file, config)
+
+    try:
+        from bridge_server.services.expression_router import (
+            ExpressionRouter as _ER,
+            get_expression_router as _get_er,
+            set_expression_router as _set_er,
+        )
+        existing = _get_er()
+        if existing is not None:
+            existing.reload(new_cfg)
+        else:
+            _set_er(_ER(new_cfg))
+    except Exception:
+        pass
+
+    return {"ok": True}
+
+
+class ExpressionRouterTestRequest(BaseModel):
+    message: str = "帮我写一个 Python 快速排序算法"
+
+
+@router.post("/expression-router/test", dependencies=_deps)
+async def test_expression_router(req: ExpressionRouterTestRequest):
+    """对指定消息运行当前表达式路由规则，返回匹配结果。"""
+    try:
+        from bridge_server.services.expression_router import get_expression_router as _get_er
+        er = _get_er()
+        if er is None:
+            return {"ok": False, "error": "表达式路由器未初始化"}
+        if not er.enabled:
+            return {"ok": False, "error": "表达式路由器未启用，请先在配置中开启"}
+        result = er.route(req.message)
+        if result is None:
+            return {"ok": True, "matched": False, "message": "无规则匹配，将降级到下一层路由"}
+        provider_id, model_id, reason = result
+        return {
+            "ok": True,
+            "matched": True,
+            "selected_model": f"{provider_id}/{model_id}",
+            "reason": reason,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@router.get("/expression-router/validate", dependencies=_deps)
+async def validate_expression_route(expr: str = Query(..., description="要验证的表达式字符串")):
+    """验证单条表达式的安全性和语法。"""
+    from bridge_server.services.expression_router import validate_expression
+    err = validate_expression(expr)
+    if err:
+        return {"valid": False, "error": err}
+    return {"valid": True}
+
+
 # ── Usage ─────────────────────────────────────────────────────────────────────
 
 def _query_usage(period: str = "today") -> Dict[str, Any]:

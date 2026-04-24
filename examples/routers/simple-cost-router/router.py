@@ -37,7 +37,7 @@ class SimpleCostRouter(BaseRouter):
         return True
 
     async def route(self, ctx: RoutingContext) -> RoutingDecision:
-        pool = ctx.healthy()
+        pool = ctx.get_healthy_models()
 
         # 过滤高延迟模型
         if self._max_p99 > 0:
@@ -47,25 +47,29 @@ class SimpleCostRouter(BaseRouter):
 
         if not pool:
             # Fallback: 任何模型（健康检查可能有延迟）
-            pool = ctx.models
+            pool = list(ctx.models)
 
         is_coding = bool(_CODING_PATTERNS.search(ctx.last_user_message))
+
+        def _cost(m) -> float:
+            return m.input_cost_per_1k + m.output_cost_per_1k
 
         if is_coding:
             # 满足编码能力门槛的模型中选最便宜的
             qualified = [m for m in pool if m.capabilities.coding >= self._coding_min]
-            best = min(qualified, key=lambda m: m.cost_per_1k) if qualified else None
+            best = min(qualified, key=_cost) if qualified else None
             reason = f"编码任务，coding≥{self._coding_min}的最便宜模型"
         else:
             best = None
             reason = "通用任务，最便宜健康模型"
 
         if best is None:
-            best = min(pool, key=lambda m: m.cost_per_1k)
+            best = min(pool, key=_cost)
 
+        cost = _cost(best)
         return RoutingDecision(
             provider=best.provider,
             model=best.model_id,
             confidence=0.85 if is_coding else 0.75,
-            reason=f"{reason}: {best.display_name} (¥{best.cost_per_1k:.4f}/K)",
+            reason=f"{reason}: {best.display_name} (¥{cost:.4f}/K)",
         )

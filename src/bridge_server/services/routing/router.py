@@ -104,6 +104,7 @@ class ScenarioMatcher:
     def match(self, message: str) -> Tuple[str, float]:
         """
         对消息进行场景匹配。
+        - conditions 字段（声明式条件）优先于 patterns 匹配
         - exclude_patterns 中任一命中 → 跳过该场景
         - 多场景同时命中 → priority 高者优先，priority 相同时取得分高者
         Returns (scenario_name, confidence) — 无匹配时返回 ('general', 0.5)
@@ -113,10 +114,22 @@ class ScenarioMatcher:
 
         scores: Dict[str, float] = {}
         for name, patterns in self._compiled.items():
+            cfg = self._scenarios[name]
+
             # Skip if any exclude pattern matches the message
             if any(p.search(message) for p in self._compiled_exclude.get(name, [])):
                 logger.debug(f"场景 '{name}' 被排除规则跳过")
                 continue
+
+            # 优先评估 conditions 声明式条件
+            conditions = cfg.get('conditions')
+            if conditions:
+                if self._eval_conditions(conditions, message):
+                    # conditions 匹配，赋予高置信度
+                    scores[name] = 0.95
+                continue  # 有 conditions 字段则不再评估 patterns
+
+            # 原有 patterns 评分逻辑
             score = 0.0
             for pattern in patterns:
                 hits = len(pattern.findall(message))
@@ -134,6 +147,70 @@ class ScenarioMatcher:
             return 'general', 0.5
 
         return best, scores[best]
+
+    @staticmethod
+    def _eval_conditions(conditions: Dict[str, Any], message: str) -> bool:
+        """
+        求值声明式条件块。
+
+        支持的条件字段：
+          message_contains: str | list[str]
+          message_length_gt: int
+          message_length_lt: int
+          time_hour_between: [start_hour, end_hour]   # 含 start，不含 end（跨午夜自动处理）
+          weekday_in: list[int]                        # 0=周一 … 6=周日
+
+        支持的逻辑组合：
+          all_of: [...]   — 所有条件都满足
+          any_of: [...]   — 任一条件满足
+          none_of: [...]  — 所有条件都不满足
+        """
+        from datetime import datetime as _dt
+        now = _dt.now()
+
+        def _eval_single(cond: Dict[str, Any]) -> bool:
+            # 嵌套逻辑
+            if 'all_of' in cond:
+                return all(_eval_single(c) for c in cond['all_of'])
+            if 'any_of' in cond:
+                return any(_eval_single(c) for c in cond['any_of'])
+            if 'none_of' in cond:
+                return not any(_eval_single(c) for c in cond['none_of'])
+
+            # 叶节点条件
+            if 'message_contains' in cond:
+                keywords = cond['message_contains']
+                if isinstance(keywords, str):
+                    keywords = [keywords]
+                return any(kw.lower() in message.lower() for kw in keywords)
+
+            if 'message_length_gt' in cond:
+                return len(message) > int(cond['message_length_gt'])
+
+            if 'message_length_lt' in cond:
+                return len(message) < int(cond['message_length_lt'])
+
+            if 'time_hour_between' in cond:
+                bounds = cond['time_hour_between']
+                if len(bounds) >= 2:
+                    start_h, end_h = int(bounds[0]), int(bounds[1])
+                    h = now.hour
+                    if start_h <= end_h:
+                        return start_h <= h < end_h
+                    else:  # 跨午夜，e.g. [22, 8]
+                        return h >= start_h or h < end_h
+                return False
+
+            if 'weekday_in' in cond:
+                return now.weekday() in [int(d) for d in cond['weekday_in']]
+
+            return False
+
+        try:
+            return _eval_single(conditions)
+        except Exception as e:
+            logger.warning(f"条件求值失败: {e}")
+            return False
 
     def get_model(self, scenario: str) -> Optional[str]:
         """获取场景对应的模型字符串 (format: 'provider/model')"""

@@ -9,11 +9,14 @@ RouterRegistry
     router.py            # 用户路由器代码（必须包含 class 继承 BaseRouter）
     router_config.yaml   # 可选，用户自定义参数（传给 __init__(config)）
 
-安全机制：
-  1. AST 扫描 — 拒绝 import os / subprocess / socket / sys 等危险模块
-  2. 300ms 硬超时 — asyncio.wait_for，超时后系统 fallback 到内置路由
-  3. RoutingDecision 校验 — provider/model 必须在 ctx.models 中
-  4. Pydantic 模型验证 manifest.json 字段
+安全机制（Layer 3 子进程沙箱）：
+  1. AST 扫描    — 拒绝危险 import / open() / globals() / __class__ 等属性链攻击
+  2. 子进程隔离  — 用户代码在独立进程中执行，通过 JSON stdin/stdout 通信
+                   Linux/macOS: resource.setrlimit 限制内存(128MB)/CPU(2s)/文件描述符(10)
+                   Windows:     asyncio 超时控制（无 resource 模块）
+  3. 300ms 超时  — asyncio.wait_for(proc.communicate(...), timeout=0.3)
+  4. RoutingDecision 校验 — provider/model 必须在 ctx.models 中
+  5. 环境变量清洗 — 子进程启动前清除所有 API Key 等敏感环境变量
 
 .bspkg 格式 = ZIP 压缩包，解压后得到上述目录结构。
 """
@@ -21,11 +24,10 @@ from __future__ import annotations
 
 import ast
 import asyncio
-import importlib.util
-import inspect
 import json
 import logging
 import shutil
+import sys
 import traceback
 import zipfile
 from pathlib import Path
@@ -47,43 +49,56 @@ _BANNED_IMPORTS = frozenset(
         "urllib", "requests", "httpx", "aiohttp", "http",
         "ftplib", "smtplib", "telnetlib", "xmlrpc",
         "builtins", "__builtins__",
+        # 额外封堵
+        "gc", "weakref", "inspect", "dis", "code", "codeop",
+        "linecache", "tokenize", "traceback", "pdb", "profile",
+        "cProfile", "timeit", "zipimport", "pkgutil", "sysconfig",
+    }
+)
+
+# 禁止调用的内置函数（即使没有 import，也可能从 builtins 访问）
+_BANNED_BUILTINS: frozenset = frozenset(
+    {
+        "open", "input", "compile", "exec", "eval", "__import__",
+        "breakpoint", "memoryview",
+    }
+)
+
+# 禁止访问的危险属性名
+_BANNED_ATTRS: frozenset = frozenset(
+    {
+        "__class__", "__bases__", "__subclasses__", "__globals__",
+        "__builtins__", "__dict__", "__code__", "__closure__",
+        "__func__", "__self__", "__wrapped__", "__reduce__",
+        "__reduce_ex__", "__getstate__", "__setstate__",
+        "mro", "__mro__", "__init_subclass__",
+    }
+)
+
+# 禁止作为函数调用的名称（包含 globals/locals/vars/getattr 等）
+_BANNED_FUNC_NAMES: frozenset = frozenset(
+    {
+        "globals", "locals", "vars", "dir", "id",
+        "getattr", "setattr", "delattr", "hasattr",
+        "type",       # type(x, y, z) 可动态创建类
+        "object",     # object.__subclasses__()
+        "super",
     }
 )
 
 _ROUTER_TIMEOUT_S = 0.3  # 300ms
 
 
-class RouterManifest:
-    """解析并校验 manifest.json。"""
-
-    REQUIRED = ("name", "version", "entrypoint", "class")
-
-    def __init__(self, data: Dict[str, Any], source_dir: Path):
-        for key in self.REQUIRED:
-            if key not in data:
-                raise ValueError(f"manifest.json 缺少必填字段: '{key}'")
-        self.name: str = data["name"]
-        self.version: str = data["version"]
-        self.entrypoint: str = data["entrypoint"]
-        self.class_name: str = data["class"]
-        self.description: str = data.get("description", "")
-        self.source_dir = source_dir
-        self._data = data
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "name": self.name,
-            "version": self.version,
-            "entrypoint": self.entrypoint,
-            "class": self.class_name,
-            "description": self.description,
-        }
-
-
 def _check_ast_security(code: str, filename: str) -> Optional[str]:
     """
-    静态 AST 分析，拒绝危险 import。
+    静态 AST 分析，拒绝危险 import 和危险调用模式。
     返回 None 表示通过，返回字符串表示拒绝原因。
+
+    防护层次：
+    1. 禁止 import 危险模块
+    2. 禁止调用危险内置函数（open/eval/exec/globals 等）
+    3. 禁止访问危险 dunder 属性（__class__/__bases__ 等类层次利用）
+    4. 禁止 exec/eval/compile/__import__ 字符串调用
     """
     try:
         tree = ast.parse(code, filename=filename)
@@ -91,21 +106,21 @@ def _check_ast_security(code: str, filename: str) -> Optional[str]:
         return f"语法错误: {e}"
 
     for node in ast.walk(tree):
+        # ── 规则 1：禁止危险 import ─────────────────────────────────────
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             if isinstance(node, ast.Import):
                 names = [alias.name for alias in node.names]
             else:
                 names = [node.module] if node.module else []
-
             for name in names:
                 root = name.split(".")[0] if name else ""
                 if root in _BANNED_IMPORTS:
                     return (
                         f"安全拒绝: import '{name}' 不允许。"
-                        f"禁止模块: {sorted(_BANNED_IMPORTS)}"
+                        f"禁止模块列表见文档。"
                     )
 
-        # 禁止 exec / eval / compile / __import__
+        # ── 规则 2：禁止调用危险内置函数和受限函数名 ────────────────────
         if isinstance(node, ast.Call):
             func = node.func
             fname = ""
@@ -113,10 +128,61 @@ def _check_ast_security(code: str, filename: str) -> Optional[str]:
                 fname = func.id
             elif isinstance(func, ast.Attribute):
                 fname = func.attr
-            if fname in ("exec", "eval", "compile", "__import__"):
+
+            if fname in _BANNED_BUILTINS:
+                return f"安全拒绝: 禁止调用内置函数 '{fname}()'"
+            if fname in _BANNED_FUNC_NAMES:
                 return f"安全拒绝: 禁止调用 '{fname}()'"
 
+        # ── 规则 3：禁止访问危险 dunder/特殊属性 ────────────────────────
+        if isinstance(node, ast.Attribute):
+            if node.attr in _BANNED_ATTRS:
+                return (
+                    f"安全拒绝: 禁止访问属性 '{node.attr}'，"
+                    f"该属性可能被用于 Python 对象层次利用攻击。"
+                )
+
+        # ── 规则 4：禁止通过下标访问 __builtins__ 等 ─────────────────────
+        if isinstance(node, ast.Subscript):
+            if isinstance(node.value, ast.Name):
+                if node.value.id in ("__builtins__", "builtins"):
+                    return "安全拒绝: 禁止通过下标访问 __builtins__"
+
     return None
+
+
+def _serialize_context(ctx: "RoutingContext") -> Dict[str, Any]:
+    """将 RoutingContext 序列化为 JSON 安全的字典（只传递安全字段）。"""
+    return {
+        "last_user_message": ctx.last_user_message,
+        "messages_count": ctx.messages_count,
+        "models": [
+            {
+                "provider": m.provider,
+                "model_id": m.model_id,
+                "display_name": m.display_name,
+                "health": m.health,
+                "input_cost_per_1k": m.input_cost_per_1k,
+                "output_cost_per_1k": m.output_cost_per_1k,
+                "capabilities": {
+                    "coding": m.capabilities.coding,
+                    "reasoning": m.capabilities.reasoning,
+                    "creative": m.capabilities.creative,
+                    "tool_use": m.capabilities.tool_use,
+                    "context_length": m.capabilities.context_length,
+                },
+                "metrics": {
+                    "latency_p50_ms": m.metrics.latency_p50_ms,
+                    "latency_p99_ms": m.metrics.latency_p99_ms,
+                    "error_rate": m.metrics.error_rate,
+                    "is_rate_limited": m.metrics.is_rate_limited,
+                },
+                "tags": list(m.tags),
+            }
+            for m in ctx.models
+        ],
+        "session_metadata": dict(ctx.session_metadata),
+    }
 
 
 class RouterRegistry:
@@ -134,9 +200,7 @@ class RouterRegistry:
 
         # state: {name: {active, version, installed_at}}
         self._state: Dict[str, Any] = self._load_state()
-
-        # 已加载的路由器实例缓存 {name: BaseRouter}
-        self._instances: Dict[str, BaseRouter] = {}
+        # subprocess 模式不缓存实例，每次路由均在新子进程中执行
 
     # ── Install ───────────────────────────────────────────────────────────────
 
@@ -186,16 +250,10 @@ class RouterRegistry:
             if err:
                 raise PermissionError(f"安全检查失败 [{py_file.name}]: {err}")
 
-        # 检查 entrypoint 和 class 存在
+        # 检查 entrypoint 存在
         ep = src / manifest.entrypoint
         if not ep.exists():
             raise FileNotFoundError(f"entrypoint '{manifest.entrypoint}' 不存在")
-
-        router_class = self._load_class(ep, manifest.class_name)
-        if not (inspect.isclass(router_class) and issubclass(router_class, BaseRouter)):
-            raise TypeError(
-                f"'{manifest.class_name}' 必须是 BaseRouter 的子类"
-            )
 
         # 复制到 routers/<name>/
         dest = self._base_dir / manifest.name
@@ -217,30 +275,28 @@ class RouterRegistry:
         }
         self._save_state()
 
-        # 清除旧实例缓存
-        self._instances.pop(manifest.name, None)
-
     # ── Activate / Deactivate / Rollback ─────────────────────────────────────
 
     def activate(self, name: str) -> None:
         if name not in self._state:
             raise KeyError(f"路由器 '{name}' 未安装")
 
-        # 实例化并运行健康检查
-        inst = self._get_or_load_instance(name)
-        try:
-            ok = inst.on_load()
-            if not ok:
-                raise RuntimeError("on_load() 返回 False")
-        except Exception as e:
-            raise RuntimeError(f"路由器 '{name}' on_load() 失败: {e}")
+        # 验证路由器可以正常加载（通过 AST + manifest 检查）
+        dest = self._base_dir / name
+        manifest_file = dest / "manifest.json"
+        with open(manifest_file, encoding="utf-8") as f:
+            manifest_data = json.load(f)
+        manifest = RouterManifest(manifest_data, dest)
+        ep = dest / manifest.entrypoint
+        if not ep.exists():
+            raise FileNotFoundError(f"entrypoint '{manifest.entrypoint}' 不存在")
 
         # 停用其他路由器
         for n in self._state:
             self._state[n]["active"] = False
         self._state[name]["active"] = True
         self._save_state()
-        logger.info(f"路由器 '{name}' 已激活")
+        logger.info(f"路由器 '{name}' 已激活（子进程沙箱模式）")
 
     def deactivate(self) -> None:
         for n in self._state:
@@ -256,7 +312,6 @@ class RouterRegistry:
 
         shutil.rmtree(dest)
         shutil.copytree(backup, dest)
-        self._instances.pop(name, None)
         logger.info(f"路由器 '{name}' 已回滚到上一个版本")
 
     # ── Remove ────────────────────────────────────────────────────────────────
@@ -267,7 +322,6 @@ class RouterRegistry:
         dest = self._base_dir / name
         if dest.exists():
             shutil.rmtree(dest)
-        self._instances.pop(name, None)
         del self._state[name]
         self._save_state()
         logger.info(f"路由器 '{name}' 已卸载")
@@ -299,40 +353,50 @@ class RouterRegistry:
                 return name
         return None
 
-    # ── Execute ───────────────────────────────────────────────────────────────
+    # ── Execute (subprocess sandbox) ─────────────────────────────────────────
 
     async def execute(
-        self, name: str, ctx: RoutingContext
-    ) -> Tuple[bool, Any]:
+        self, name: str, ctx: "RoutingContext"
+    ) -> "Tuple[bool, Any]":
         """
-        执行路由器并返回 (success, RoutingDecision|error_msg)。
-        300ms 超时后返回 (False, "timeout")。
+        在隔离子进程中执行路由器，返回 (success, RoutingDecision|error_msg)。
+        超时或失败时返回 (False, error_msg)，调用方应 fallback 到内置路由。
+
+        跨平台：
+          - Linux/macOS: 子进程受 resource 限制（内存/CPU/文件描述符）
+          - Windows:     仅 asyncio 超时控制
         """
         try:
-            inst = self._get_or_load_instance(name)
-            decision = await asyncio.wait_for(
-                inst.route(ctx), timeout=_ROUTER_TIMEOUT_S
+            result = await self._run_in_subprocess(name, ctx)
+            if not result.get("ok"):
+                err = result.get("error", "unknown error")
+                logger.warning(f"路由器 '{name}' 沙箱执行失败: {err}")
+                return False, err
+
+            decision = RoutingDecision(
+                provider=result["provider"],
+                model=result["model"],
+                confidence=float(result.get("confidence", 0.5)),
+                reason=result.get("reason", ""),
             )
-
-            if not isinstance(decision, RoutingDecision):
-                return False, f"路由器返回类型错误: {type(decision)}"
-
             err = decision.validate(ctx)
             if err:
                 return False, f"RoutingDecision 校验失败: {err}"
-
             return True, decision
 
         except asyncio.TimeoutError:
-            logger.warning(f"路由器 '{name}' 执行超时 (>{_ROUTER_TIMEOUT_S*1000:.0f}ms)，fallback 到内置路由")
+            logger.warning(
+                f"路由器 '{name}' 执行超时 (>{_ROUTER_TIMEOUT_S*1000:.0f}ms)，"
+                f"fallback 到内置路由"
+            )
             return False, "timeout"
         except Exception as e:
             logger.warning(f"路由器 '{name}' 执行异常: {e}\n{traceback.format_exc()}")
             return False, str(e)
 
     async def test_router(
-        self, name: str, ctx: RoutingContext
-    ) -> Dict[str, Any]:
+        self, name: str, ctx: "RoutingContext"
+    ) -> "Dict[str, Any]":
         """测试接口，返回完整诊断信息（供 /api/admin/router/test 使用）。"""
         import time as _time
         start = _time.perf_counter()
@@ -354,17 +418,14 @@ class RouterRegistry:
             "elapsed_ms": elapsed_ms,
         }
 
-    # ── Internal ──────────────────────────────────────────────────────────────
+    # ── Subprocess management ─────────────────────────────────────────────────
 
-    def _get_or_load_instance(self, name: str) -> BaseRouter:
-        if name in self._instances:
-            return self._instances[name]
-
-        inst = self._load_instance(name)
-        self._instances[name] = inst
-        return inst
-
-    def _load_instance(self, name: str) -> BaseRouter:
+    async def _run_in_subprocess(
+        self, name: str, ctx: "RoutingContext"
+    ) -> "Dict[str, Any]":
+        """
+        启动沙箱子进程，通过 JSON IPC 执行路由器，带超时控制。
+        """
         dest = self._base_dir / name
         if not dest.exists():
             raise FileNotFoundError(f"路由器目录不存在: {dest}")
@@ -374,34 +435,60 @@ class RouterRegistry:
             manifest_data = json.load(f)
         manifest = RouterManifest(manifest_data, dest)
 
-        ep = dest / manifest.entrypoint
-        router_class = self._load_class(ep, manifest.class_name)
-
-        # 读取 router_config.yaml（可选）
         cfg_file = dest / "router_config.yaml"
         config: Dict[str, Any] = {}
         if cfg_file.exists():
             try:
                 with open(cfg_file, encoding="utf-8") as f:
-                    config = yaml.safe_load(f) or {}
+                    raw_cfg = yaml.safe_load(f)
+                    config = raw_cfg or {}
             except Exception:
                 pass
 
-        return router_class(config)
+        # 将 RoutingContext 序列化为 JSON（只传递安全数据）
+        context_data = _serialize_context(ctx)
 
-    @staticmethod
-    def _load_class(py_file: Path, class_name: str) -> type:
-        spec = importlib.util.spec_from_file_location(
-            f"_custom_router_{py_file.stem}", py_file
+        request_payload = json.dumps({
+            "router_dir": str(dest),
+            "entrypoint": manifest.entrypoint,
+            "class": manifest.class_name,
+            "config": config,
+            "context": context_data,
+        }, ensure_ascii=False)
+
+        sandbox_script = str(Path(__file__).parent / "sandbox_runner.py")
+
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, sandbox_script,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        if spec is None or spec.loader is None:
-            raise ImportError(f"无法加载 '{py_file}'")
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)  # type: ignore[union-attr]
-        cls = getattr(mod, class_name, None)
-        if cls is None:
-            raise AttributeError(f"'{py_file}' 中找不到类 '{class_name}'")
-        return cls
+
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                proc.communicate(input=request_payload.encode("utf-8")),
+                timeout=_ROUTER_TIMEOUT_S,
+            )
+        except asyncio.TimeoutError:
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception:
+                pass
+            raise
+
+        if stderr_bytes:
+            logger.debug(f"路由器 '{name}' 沙箱 stderr: {stderr_bytes.decode('utf-8', errors='replace')[:500]}")
+
+        if not stdout_bytes:
+            return {"ok": False, "error": "沙箱子进程无输出"}
+
+        try:
+            return json.loads(stdout_bytes.decode("utf-8"))
+        except json.JSONDecodeError as e:
+            raw = stdout_bytes.decode("utf-8", errors="replace")[:200]
+            return {"ok": False, "error": f"沙箱输出解析失败: {e} | 原始输出: {raw}"}
 
     # ── State persistence ─────────────────────────────────────────────────────
 

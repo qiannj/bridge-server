@@ -1,217 +1,154 @@
 """
-Bridge Server 开放路由 SDK
-================================
-用户通过继承 BaseRouter 实现自定义路由逻辑并一键导入 Bridge Server。
+Bridge Server Router SDK
+========================
+供自定义路由器插件使用的公开 API。
 
-使用流程：
-  1. 继承 BaseRouter，实现 route(ctx) 方法
-  2. 在项目根目录创建 manifest.json
-  3. 运行 bridge-server router import <目录>  或上传 .bspkg 包
+用户路由器示例：
+    from bridge_server.router_sdk import BaseRouter, RoutingContext, RoutingDecision
 
-安全约束（自动强制）：
-  - 不可 import os / subprocess / socket / sys 等危险模块
-  - route() 硬超时 300ms，超时后系统自动 fallback 到内置路由
-  - RoutingDecision 中 provider/model 必须在 ctx.models 已知列表中
-  - RoutingContext 永不包含 api_key / oauth_token / 完整对话内容
+    class MyRouter(BaseRouter):
+        def on_load(self) -> bool:
+            return True
+
+        async def route(self, ctx: RoutingContext) -> RoutingDecision:
+            if "代码" in ctx.last_user_message:
+                return RoutingDecision(provider="openai", model="gpt-4o", confidence=0.9, reason="编程任务")
+            return RoutingDecision(provider="dashscope", model="qwen3.5-plus", confidence=0.7, reason="通用任务")
 """
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
+import abc
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Optional
 
 
-# ── 模型信息 ────────────────────────────────────────────────────────────────
+# ── 模型元信息（只读） ─────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
 class ModelCapabilities:
-    """
-    模型能力评分（0.0 ~ 1.0），数据来自 cli/model-benchmark.py 的测试结果。
-    若尚未运行 benchmark，所有字段默认为 0.0。
-    """
-    coding: float = 0.0         # 代码生成 / 调试能力
-    reasoning: float = 0.0      # 逻辑推理 / 数学能力
-    creative: float = 0.0       # 创意写作 / 内容生成
-    tool_use: float = 0.0       # 函数调用 / 工具使用
-    context_length: int = 4096  # 最大上下文长度（tokens）
+    """模型能力评分（0-1 浮点数，来自 benchmark 数据）。"""
+    coding: float = 0.0
+    reasoning: float = 0.0
+    creative: float = 0.0
+    tool_use: float = 0.0
+    context_length: int = 4096
 
 
 @dataclass(frozen=True)
 class ModelMetrics:
-    """运行时动态指标（过去 5 分钟滚动窗口）。首次启动或无请求时为默认值。"""
-    latency_p50_ms: float = 0.0     # 中位延迟
-    latency_p99_ms: float = 0.0     # 99 分位延迟
-    error_rate: float = 0.0          # 错误率 0.0~1.0
-    is_rate_limited: bool = False    # 当前是否触发限流
+    """模型近期运行指标（5 分钟滚动窗口）。"""
+    latency_p50_ms: float = 0.0
+    latency_p99_ms: float = 0.0
+    error_rate: float = 0.0
+    is_rate_limited: bool = False
 
 
 @dataclass(frozen=True)
 class ModelInfo:
-    """单个模型的完整信息快照（只读）。"""
+    """
+    单个模型的完整信息快照。
+    由 ModelInfoAggregator 每 30 秒刷新，作为只读数据传给路由器。
+    """
     provider: str
     model_id: str
-    display_name: str
-    health: Literal["healthy", "degraded", "down", "unknown"]
-    input_cost_per_1k: float    # ¥/1K input tokens（来自 config.yaml）
-    output_cost_per_1k: float   # ¥/1K output tokens
-    capabilities: ModelCapabilities
-    metrics: ModelMetrics
+    display_name: str = ""
+    health: str = "unknown"        # "healthy" | "degraded" | "down" | "unknown"
+    input_cost_per_1k: float = 0.0
+    output_cost_per_1k: float = 0.0
+    capabilities: ModelCapabilities = field(default_factory=ModelCapabilities)
+    metrics: ModelMetrics = field(default_factory=ModelMetrics)
     tags: List[str] = field(default_factory=list)
 
     @property
-    def cost_per_1k(self) -> float:
-        """总综合成本（输入+输出 ¥/1K tokens）"""
-        return self.input_cost_per_1k + self.output_cost_per_1k
-
-    @property
-    def full_name(self) -> str:
-        """'provider/model_id' 格式，用于 RoutingDecision 校验"""
+    def full_id(self) -> str:
+        """返回 'provider/model_id' 格式的完整标识符。"""
         return f"{self.provider}/{self.model_id}"
 
+    @property
+    def is_healthy(self) -> bool:
+        return self.health == "healthy"
 
-# ── 路由上下文（只读，传给自定义路由器）────────────────────────────────────
+
+# ── 路由上下文（传给路由器的只读输入） ─────────────────────────────────────────
 
 @dataclass(frozen=True)
 class RoutingContext:
     """
-    传给自定义路由器的只读上下文。
-
-    ⚠️  永远不包含：api_key、oauth_token、完整历史消息内容。
-    路由器只能看到 last_user_message、消息轮数、模型列表和 session 元数据。
+    路由决策的输入上下文。
+    所有字段均为只读，不包含任何系统内部对象（provider_manager、token 等）。
     """
     last_user_message: str
-    messages_count: int
-    models: List[ModelInfo]
+    messages_count: int = 1
+    models: List[ModelInfo] = field(default_factory=list)
     session_metadata: Dict[str, Any] = field(default_factory=dict)
 
-    # ── 内置便利方法（减少样板代码）─────────────────────────────────────────
+    def get_healthy_models(self) -> List[ModelInfo]:
+        """返回当前健康的模型列表。"""
+        return [m for m in self.models if m.is_healthy]
 
-    def healthy(self) -> List[ModelInfo]:
-        """返回所有 health='healthy' 的模型。"""
-        return [m for m in self.models if m.health == "healthy"]
-
-    def cheapest(
-        self,
-        min_capability: Optional[str] = None,
-        min_score: float = 0.0,
-    ) -> Optional[ModelInfo]:
-        """
-        健康节点中综合成本最低的模型。
-
-        Args:
-            min_capability: 'coding' | 'reasoning' | 'creative' | 'tool_use'
-            min_score:      对应能力的最低分数门槛（0.0~1.0）
-        """
-        pool = self.healthy()
-        if min_capability:
-            pool = [
-                m for m in pool
-                if getattr(m.capabilities, min_capability, 0.0) >= min_score
-            ]
-        return min(pool, key=lambda m: m.cost_per_1k, default=None)
-
-    def best(self, capability: str = "reasoning") -> Optional[ModelInfo]:
-        """健康节点中指定能力最强的模型。"""
-        return max(
-            self.healthy(),
-            key=lambda m: getattr(m.capabilities, capability, 0.0),
-            default=None,
-        )
-
-    def under_latency(self, max_p99_ms: float) -> List[ModelInfo]:
-        """健康节点中 p99 延迟低于阈值的模型列表。"""
-        return [
-            m for m in self.healthy()
-            if m.metrics.latency_p99_ms <= max_p99_ms
-        ]
-
-    def by_tag(self, tag: str) -> List[ModelInfo]:
-        """按 tag 过滤健康节点（tag 在 config.yaml model.tags 中定义）。"""
-        return [m for m in self.healthy() if tag in m.tags]
-
-
-# ── 路由决策 ────────────────────────────────────────────────────────────────
-
-@dataclass
-class RoutingDecision:
-    """路由器 route() 方法必须返回的结构。"""
-    provider: str
-    model: str
-    confidence: float   # 0.0 ~ 1.0，路由置信度
-    reason: str         # 人类可读的路由原因，写入请求日志
-
-    def validate(self, ctx: RoutingContext) -> Optional[str]:
-        """
-        校验决策合法性。
-        返回 None 表示合法；返回字符串表示错误信息（系统将拒绝该决策并 fallback）。
-        """
-        valid_names = {m.full_name for m in ctx.models}
-        full = f"{self.provider}/{self.model}"
-        if full not in valid_names:
-            return (
-                f"路由目标 '{full}' 不在可用模型列表中。"
-                f"可用: {sorted(valid_names)}"
-            )
-        if not 0.0 <= self.confidence <= 1.0:
-            return f"confidence 必须在 0.0~1.0 之间，实际值: {self.confidence}"
-        if not self.reason:
-            return "reason 不能为空"
+    def find_model(self, provider: str, model_id: str) -> Optional[ModelInfo]:
+        """按 provider + model_id 查找模型信息。"""
+        for m in self.models:
+            if m.provider == provider and m.model_id == model_id:
+                return m
         return None
 
 
-# ── 基类 ─────────────────────────────────────────────────────────────────────
+# ── 路由决策（路由器的输出） ──────────────────────────────────────────────────
 
-class BaseRouter(ABC):
-    """
-    自定义路由器基类。
+@dataclass
+class RoutingDecision:
+    """路由器返回的决策结果。"""
+    provider: str
+    model: str
+    confidence: float = 0.5      # 0-1，置信度
+    reason: str = ""
 
-    最小实现示例::
-
-        from bridge_server.router_sdk import BaseRouter, RoutingContext, RoutingDecision
-
-        class MyRouter(BaseRouter):
-            async def route(self, ctx: RoutingContext) -> RoutingDecision:
-                m = ctx.cheapest('coding', min_score=0.7) or ctx.healthy()[0]
-                return RoutingDecision(
-                    provider=m.provider,
-                    model=m.model_id,
-                    confidence=0.8,
-                    reason='默认最便宜编码模型',
-                )
-
-    manifest.json 最小示例::
-
-        {
-            "name": "my-router",
-            "version": "1.0.0",
-            "entrypoint": "router.py",
-            "class": "MyRouter"
-        }
-    """
-
-    def __init__(self, config: Dict[str, Any]):
+    def validate(self, ctx: RoutingContext) -> Optional[str]:
         """
-        Args:
-            config: 来自 router_config.yaml 的用户自定义参数字典。
+        校验决策是否合法。
+        返回 None 表示校验通过；返回字符串表示错误信息。
         """
-        self.config = config
+        if not self.provider or not self.model:
+            return "provider 和 model 字段不能为空"
+        if not (0.0 <= self.confidence <= 1.0):
+            return f"confidence 必须在 0-1 范围内，当前值: {self.confidence}"
+
+        # 检查 provider/model 是否在可用模型列表中
+        available = {(m.provider, m.model_id) for m in ctx.models}
+        if available and (self.provider, self.model) not in available:
+            return (
+                f"模型 '{self.provider}/{self.model}' 不在可用模型列表中。"
+                f"可用: {sorted(f'{p}/{m}' for p, m in available)}"
+            )
+        return None
+
+
+# ── 基础路由器抽象类 ──────────────────────────────────────────────────────────
+
+class BaseRouter(abc.ABC):
+    """
+    自定义路由器必须继承此类。
+
+    合约：
+    - __init__(config: dict)  — 接收 router_config.yaml 中的配置
+    - on_load() -> bool       — 健康检查，返回 False 则拒绝激活
+    - route(ctx) -> RoutingDecision  — 异步路由决策，必须在 300ms 内返回
+    """
+
+    def __init__(self, config: Dict[str, Any] = None):
+        self.config: Dict[str, Any] = config or {}
 
     def on_load(self) -> bool:
-        """
-        加载时健康检查（可选重写）。
-        返回 False 或抛出异常 → 拒绝激活该路由器。
-        可在此处加载模型文件、预热缓存等。
-        """
+        """路由器激活前的健康检查。返回 False 则激活失败。"""
         return True
 
-    @abstractmethod
+    @abc.abstractmethod
     async def route(self, ctx: RoutingContext) -> RoutingDecision:
         """
         核心路由逻辑。
-
-        约束：
-          - 严禁阻塞调用（数据库查询、网络请求等）
-          - 硬超时 300ms，超时后系统自动 fallback 到内置路由
-          - 必须返回 RoutingDecision，provider/model 必须在 ctx.models 中
+        - 必须是 async 方法
+        - 必须在 300ms 内返回
+        - 只能使用 ctx 中的只读数据，禁止访问文件系统或网络
         """
         ...
