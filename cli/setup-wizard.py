@@ -1108,7 +1108,7 @@ class SetupWizard:
             },
             "expires_in": expires_in,
             "base_url": CODEX_BASE_URL,
-            "last_refresh": datetime.utcnow().isoformat() + 'Z',
+            "last_refresh": datetime.now(tz=None).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
 
     def _collect_openai_codex_oauth_config(self, provider_name: str = 'openai') -> Optional[Dict[str, Any]]:
@@ -1193,7 +1193,18 @@ class SetupWizard:
         """获取 OAuth access_token，失败返回 None。"""
         if oauth_cfg.get('provider') == 'openai_codex':
             try:
-                from bridge_server.providers.oauth_manager import OAuthTokenManager, OAuthTokenRevokedException
+                # Import the module directly to avoid triggering heavy
+                # bridge_server.providers.__init__ chain (needs structlog etc.)
+                import importlib.util as _ilu
+                _spec = _ilu.spec_from_file_location(
+                    "oauth_manager",
+                    os.path.join(REPO_ROOT, "src", "bridge_server", "providers", "oauth_manager.py"),
+                )
+                _mod = _ilu.module_from_spec(_spec)
+                _spec.loader.exec_module(_mod)
+                OAuthTokenManager = _mod.OAuthTokenManager
+                OAuthTokenRevokedException = _mod.OAuthTokenRevokedException
+
                 manager = OAuthTokenManager(
                     token_url=oauth_cfg['token_url'],
                     client_id=oauth_cfg['client_id'],
@@ -1204,11 +1215,11 @@ class SetupWizard:
                 if token:
                     print(f"  {Colors.GREEN}✓ OAuth Token 获取成功{Colors.ENDC}")
                     return token
-            except OAuthTokenRevokedException:
-                print(f"  {Colors.RED}✗ Refresh Token 已失效，请重新运行 setup-wizard 登录{Colors.ENDC}")
-                return None
             except Exception as e:
-                print(f"  {Colors.RED}✗ OAuth 请求失败：{e}{Colors.ENDC}")
+                if 'revoked' in str(type(e).__name__).lower() or 'revoked' in str(e).lower():
+                    print(f"  {Colors.RED}✗ Refresh Token 已失效，请重新运行 setup-wizard 登录{Colors.ENDC}")
+                else:
+                    print(f"  {Colors.RED}✗ OAuth 请求失败：{e}{Colors.ENDC}")
                 return None
 
         data = {
