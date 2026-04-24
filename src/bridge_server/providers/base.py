@@ -137,6 +137,8 @@ class BaseProvider(ABC):
                 scope=oauth_cfg.get("scope"),
                 grant_type=oauth_cfg.get("grant_type", "client_credentials"),
                 extra_params=oauth_cfg.get("extra_params"),
+                provider=oauth_cfg.get("provider"),
+                auth_store_key=oauth_cfg.get("auth_store_key"),
             )
 
         self.models = self._load_models()

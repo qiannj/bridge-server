@@ -20,6 +20,7 @@ import httpx
 import math
 import re as _re
 import time
+import webbrowser
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime
@@ -36,6 +37,12 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+
+
+CODEX_OAUTH_CLIENT_ID = "app_EMSIwP0jz89reVQ2vW0gjmN6r4an"
+CODEX_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
+CODEX_OAUTH_DEVICE_ISSUER = "https://auth.openai.com"
+CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
 
 
 # ── Benchmark 常量 ─────────────────────────────────────────────────────────────
@@ -364,7 +371,10 @@ class SetupWizard:
         }
         
         # 配置目录
-        if sys.platform == 'win32':
+        config_dir_override = os.environ.get('BRIDGE_SERVER_CONFIG_DIR', '').strip()
+        if config_dir_override:
+            self.config_dir = Path(config_dir_override).expanduser()
+        elif sys.platform == 'win32':
             self.config_dir = Path(os.environ.get('USERPROFILE', '')) / '.bridge-server'
         else:
             self.config_dir = Path.home() / '.bridge-server'
@@ -573,10 +583,10 @@ class SetupWizard:
         print(f"  Base URL: {provider.base_url}")
 
         # ── 认证方式选择 ──────────────────────────────────────────────────────
-        auth_type = self._choose_auth_type()
+        auth_type = self._choose_auth_type(provider)
 
-        if auth_type == "oauth":
-            oauth_cfg = self._collect_oauth_config()
+        if auth_type in {"oauth", "openai_codex"}:
+            oauth_cfg = self._collect_oauth_config(auth_type=auth_type, provider_name=provider.name)
             if not oauth_cfg:
                 print(f"{Colors.YELLOW}⚠️  已取消{Colors.ENDC}")
                 return
@@ -595,16 +605,17 @@ class SetupWizard:
         
         # 测试连接
         print(f"\n{Colors.CYAN}测试连接...{Colors.ENDC}")
-        if auth_type == "oauth":
-            success = self._test_oauth_connection(provider.base_url, oauth_cfg, models[0]['id'])
+        if auth_type in {"oauth", "openai_codex"}:
+            runtime_base_url = oauth_cfg.get('base_url', provider.base_url)
+            success = self._test_oauth_connection(runtime_base_url, oauth_cfg, models[0]['id'])
         else:
             success = self._test_provider_connection(provider.base_url, api_key, models[0]['id'])
         
         if success:
-            if auth_type == "oauth":
+            if auth_type in {"oauth", "openai_codex"}:
                 provider_config = {
                     'name': provider.name,
-                    'base_url': provider.base_url,
+                    'base_url': oauth_cfg.get('base_url', provider.base_url),
                     'auth_type': 'oauth',
                     'oauth': oauth_cfg,
                     'models': models,
@@ -621,20 +632,20 @@ class SetupWizard:
             self.config['providers'].append(provider_config)
             print(f"{Colors.GREEN}✅ {provider.name} 配置成功并已保存！{Colors.ENDC}")
             # 邀约进行能力测试
-            _bm_key = api_key if auth_type != "oauth" else (self._fetch_oauth_token(oauth_cfg) or "")
+            _bm_key = api_key if auth_type == "api_key" else (self._fetch_oauth_token(oauth_cfg) or "")
             model_ids = [m.get('id', '') if isinstance(m, dict) else str(m) for m in models]
             _offer_benchmark_after_add(
-                provider.name, provider.base_url, _bm_key,
+                provider.name, provider_config['base_url'], _bm_key,
                 model_ids, Colors, self.config_dir,
             )
         else:
             print(f"{Colors.RED}❌ 连接测试失败，配置未保存{Colors.ENDC}")
             retry = input("是否跳过连接测试，强制保存？[y/N]: ").strip().lower()
             if retry == 'y':
-                if auth_type == "oauth":
+                if auth_type in {"oauth", "openai_codex"}:
                     provider_config = {
                         'name': provider.name,
-                        'base_url': provider.base_url,
+                        'base_url': oauth_cfg.get('base_url', provider.base_url),
                         'auth_type': 'oauth',
                         'oauth': oauth_cfg,
                         'models': models,
@@ -666,10 +677,10 @@ class SetupWizard:
             return
 
         # ── 认证方式选择 ──────────────────────────────────────────────────────
-        auth_type = self._choose_auth_type()
+        auth_type = self._choose_auth_type(base_url=base_url)
 
-        if auth_type == "oauth":
-            oauth_cfg = self._collect_oauth_config()
+        if auth_type in {"oauth", "openai_codex"}:
+            oauth_cfg = self._collect_oauth_config(auth_type=auth_type, provider_name=name)
             if not oauth_cfg:
                 print(f"{Colors.YELLOW}⚠️  已取消{Colors.ENDC}")
                 return
@@ -701,16 +712,17 @@ class SetupWizard:
 
         # ── 测试连接 ──────────────────────────────────────────────────────────
         print(f"\n{Colors.CYAN}测试连接...{Colors.ENDC}")
-        if auth_type == "oauth":
-            success = self._test_oauth_connection(base_url, oauth_cfg, models[0]['id'])
+        if auth_type in {"oauth", "openai_codex"}:
+            runtime_base_url = oauth_cfg.get('base_url', base_url)
+            success = self._test_oauth_connection(runtime_base_url, oauth_cfg, models[0]['id'])
         else:
             success = self._test_provider_connection(base_url, api_key, models[0]['id'])
 
         if success:
-            if auth_type == "oauth":
+            if auth_type in {"oauth", "openai_codex"}:
                 provider_config = {
                     'name': name,
-                    'base_url': base_url,
+                    'base_url': oauth_cfg.get('base_url', base_url),
                     'auth_type': 'oauth',
                     'oauth': oauth_cfg,
                     'models': models,
@@ -727,20 +739,20 @@ class SetupWizard:
             self.config['providers'].append(provider_config)
             print(f"{Colors.GREEN}✅ {name} 配置成功并已保存！{Colors.ENDC}")
             # 邀约进行能力测试
-            _bm_key = api_key if auth_type != "oauth" else (self._fetch_oauth_token(oauth_cfg) or "")
+            _bm_key = api_key if auth_type == "api_key" else (self._fetch_oauth_token(oauth_cfg) or "")
             model_ids = [m.get('id', '') if isinstance(m, dict) else str(m) for m in models]
             _offer_benchmark_after_add(
-                name, base_url, _bm_key,
+                name, provider_config['base_url'], _bm_key,
                 model_ids, Colors, self.config_dir,
             )
         else:
             print(f"{Colors.RED}❌ 连接测试失败，配置未保存{Colors.ENDC}")
             retry = input("是否跳过连接测试，强制保存？[y/N]: ").strip().lower()
             if retry == 'y':
-                if auth_type == "oauth":
+                if auth_type in {"oauth", "openai_codex"}:
                     provider_config = {
                         'name': name,
-                        'base_url': base_url,
+                        'base_url': oauth_cfg.get('base_url', base_url),
                         'auth_type': 'oauth',
                         'oauth': oauth_cfg,
                         'models': models,
@@ -912,18 +924,32 @@ class SetupWizard:
         provider = self.config['providers'].pop(idx)
         print(f"{Colors.GREEN}✓ 已删除 {provider['name']}{Colors.ENDC}")
     
-    def _choose_auth_type(self) -> str:
-        """让用户选择认证方式，返回 'api_key' 或 'oauth'。"""
+    def _choose_auth_type(self, provider: Optional[Any] = None, base_url: str = "") -> str:
+        """让用户选择认证方式。"""
         print(f"\n{Colors.CYAN}选择认证方式:{Colors.ENDC}")
+        options = ["🔑 API Key（标准 Bearer Token）", "🔐 OAuth 2.0 Client Credentials"]
+
+        provider_id = str(getattr(provider, "id", "") or "").strip().lower()
+        provider_name = str(getattr(provider, "name", "") or "").strip().lower()
+        resolved_base_url = (base_url or str(getattr(provider, "base_url", "") or "")).strip().lower()
+        is_openai = provider_id == "openai" or provider_name == "openai" or "chatgpt.com/backend-api/codex" in resolved_base_url
+        if is_openai:
+            options.insert(1, "🧠 ChatGPT 账号授权（OpenAI Codex OAuth）")
+
         auth_type = select_from_list(
             "认证方式（↑↓ 移动，Enter 确认）",
-            ["🔑 API Key（标准 Bearer Token）", "🔐 OAuth 2.0 Client Credentials"],
+            options,
             default_index=0,
         )
+        if "ChatGPT 账号授权" in auth_type:
+            return "openai_codex"
         return "oauth" if "OAuth" in auth_type else "api_key"
 
-    def _collect_oauth_config(self) -> Optional[Dict[str, Any]]:
-        """交互式收集 OAuth 2.0 Client Credentials 配置，返回 oauth dict 或 None（放弃）。"""
+    def _collect_oauth_config(self, auth_type: str = "oauth", provider_name: str = "") -> Optional[Dict[str, Any]]:
+        """收集 OAuth 配置。"""
+        if auth_type == "openai_codex":
+            return self._collect_openai_codex_oauth_config(provider_name=provider_name or "openai")
+
         print(f"\n{Colors.BOLD}OAuth 2.0 配置{Colors.ENDC}")
         print(f"  grant_type 固定为 client_credentials（标准企业 SSO 场景）\n")
 
@@ -950,8 +976,176 @@ class SetupWizard:
             cfg["scope"] = scope
         return cfg
 
+    def _auth_store_path(self) -> Path:
+        return self.config_dir / 'auth.json'
+
+    def _save_oauth_auth_store(self, key: str, auth_payload: Dict[str, Any]) -> None:
+        path = self._auth_store_path()
+        data: Dict[str, Any] = {}
+        if path.exists():
+            raw = path.read_text(encoding='utf-8')
+            try:
+                data = json.loads(raw)
+            except Exception:
+                try:
+                    parsed = yaml.safe_load(raw) or {}
+                    if isinstance(parsed, dict):
+                        data = parsed
+                except Exception:
+                    data = {}
+        providers = data.setdefault('providers', {})
+        providers[key] = auth_payload
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
+        if os.name != 'nt':
+            os.chmod(path, 0o600)
+
+    def _is_remote_session(self) -> bool:
+        return bool(os.getenv('SSH_CLIENT') or os.getenv('SSH_TTY'))
+
+    def _run_openai_codex_oauth_login(self) -> Dict[str, Any]:
+        issuer = CODEX_OAUTH_DEVICE_ISSUER
+
+        try:
+            resp = httpx.post(
+                f"{issuer}/api/accounts/deviceauth/usercode",
+                json={"client_id": CODEX_OAUTH_CLIENT_ID},
+                headers={"Content-Type": "application/json"},
+                timeout=15,
+            )
+        except Exception as exc:
+            raise RuntimeError(f"OpenAI Codex 设备码申请失败：{exc}") from exc
+
+        if resp.status_code != 200:
+            raise RuntimeError(f"OpenAI Codex 设备码申请失败：HTTP {resp.status_code}")
+
+        device_data = resp.json()
+        user_code = str(device_data.get("user_code", "") or "").strip()
+        device_auth_id = str(device_data.get("device_auth_id", "") or "").strip()
+        poll_interval = max(3, int(device_data.get("interval", 5) or 5))
+        if not user_code or not device_auth_id:
+            raise RuntimeError("OpenAI Codex 设备码响应缺少 user_code 或 device_auth_id")
+
+        verification_url = f"{issuer}/codex/device"
+        print(f"\n{Colors.BOLD}OpenAI Codex / ChatGPT OAuth 登录{Colors.ENDC}")
+        print("  1. 用浏览器打开下面这个地址：")
+        print(f"     {Colors.CYAN}{verification_url}{Colors.ENDC}")
+        print("  2. 请使用你的 ChatGPT 账号登录")
+        print(f"  3. 输入授权码：{Colors.YELLOW}{user_code}{Colors.ENDC}")
+        print("  4. 授权完成后回到终端，程序会自动继续\n")
+
+        if not self._is_remote_session():
+            try:
+                opened = webbrowser.open(verification_url)
+                if opened:
+                    print(f"  {Colors.GREEN}✓ 已尝试自动打开浏览器{Colors.ENDC}")
+            except Exception:
+                pass
+
+        print("等待授权完成...（Ctrl+C 可取消）")
+        deadline = time.monotonic() + 15 * 60
+        code_resp = None
+        while time.monotonic() < deadline:
+            time.sleep(poll_interval)
+            poll_resp = httpx.post(
+                f"{issuer}/api/accounts/deviceauth/token",
+                json={"device_auth_id": device_auth_id, "user_code": user_code},
+                headers={"Content-Type": "application/json"},
+                timeout=15,
+            )
+            if poll_resp.status_code == 200:
+                code_resp = poll_resp.json()
+                break
+            if poll_resp.status_code in (403, 404):
+                continue
+            raise RuntimeError(f"OpenAI Codex 轮询失败：HTTP {poll_resp.status_code}")
+
+        if code_resp is None:
+            raise RuntimeError("OpenAI Codex 登录超时（15 分钟）")
+
+        authorization_code = str(code_resp.get("authorization_code", "") or "").strip()
+        code_verifier = str(code_resp.get("code_verifier", "") or "").strip()
+        if not authorization_code or not code_verifier:
+            raise RuntimeError("OpenAI Codex 授权响应缺少 authorization_code 或 code_verifier")
+
+        token_resp = httpx.post(
+            CODEX_OAUTH_TOKEN_URL,
+            data={
+                "grant_type": "authorization_code",
+                "code": authorization_code,
+                "redirect_uri": f"{issuer}/deviceauth/callback",
+                "client_id": CODEX_OAUTH_CLIENT_ID,
+                "code_verifier": code_verifier,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=15,
+        )
+        if token_resp.status_code != 200:
+            raise RuntimeError(f"OpenAI Codex Token 交换失败：HTTP {token_resp.status_code}")
+
+        token_payload = token_resp.json()
+        access_token = str(token_payload.get("access_token", "") or "").strip()
+        refresh_token = str(token_payload.get("refresh_token", "") or "").strip()
+        if not access_token or not refresh_token:
+            raise RuntimeError("OpenAI Codex Token 响应缺少 access_token 或 refresh_token")
+
+        return {
+            "tokens": {
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+            },
+            "base_url": CODEX_BASE_URL,
+            "last_refresh": datetime.utcnow().isoformat() + 'Z',
+        }
+
+    def _collect_openai_codex_oauth_config(self, provider_name: str = 'openai') -> Optional[Dict[str, Any]]:
+        try:
+            login_result = self._run_openai_codex_oauth_login()
+        except KeyboardInterrupt:
+            print(f"\n{Colors.YELLOW}⚠️  已取消{Colors.ENDC}")
+            return None
+        except Exception as exc:
+            print(f"{Colors.RED}✗ OpenAI Codex OAuth 登录失败：{exc}{Colors.ENDC}")
+            return None
+
+        auth_store_key = provider_name.strip() or 'openai'
+        self._save_oauth_auth_store(
+            auth_store_key,
+            {
+                'provider': 'openai_codex',
+                'tokens': login_result['tokens'],
+                'last_refresh': login_result.get('last_refresh'),
+                'base_url': login_result.get('base_url', CODEX_BASE_URL),
+            },
+        )
+        print(f"{Colors.GREEN}✓ OpenAI Codex OAuth 登录成功，凭据已保存到 {self._auth_store_path()}{Colors.ENDC}")
+        return {
+            'provider': 'openai_codex',
+            'auth_store_key': auth_store_key,
+            'client_id': CODEX_OAUTH_CLIENT_ID,
+            'token_url': CODEX_OAUTH_TOKEN_URL,
+            'grant_type': 'refresh_token',
+            'base_url': login_result.get('base_url', CODEX_BASE_URL),
+        }
+
     def _fetch_oauth_token(self, oauth_cfg: Dict[str, Any]) -> Optional[str]:
-        """用 OAuth client credentials 换取 access_token，失败返回 None。"""
+        """获取 OAuth access_token，失败返回 None。"""
+        if oauth_cfg.get('provider') == 'openai_codex':
+            try:
+                from bridge_server.providers.oauth_manager import OAuthTokenManager
+                manager = OAuthTokenManager(
+                    token_url=oauth_cfg['token_url'],
+                    client_id=oauth_cfg['client_id'],
+                    provider='openai_codex',
+                    auth_store_key=oauth_cfg['auth_store_key'],
+                )
+                token = manager.get_cached_token_sync()
+                if token:
+                    print(f"  {Colors.GREEN}✓ OAuth Token 获取成功{Colors.ENDC}")
+                    return token
+            except Exception as e:
+                print(f"  {Colors.RED}✗ OAuth 请求失败：{e}{Colors.ENDC}")
+                return None
+
         data = {
             "grant_type": "client_credentials",
             "client_id": oauth_cfg["client_id"],
@@ -961,7 +1155,7 @@ class SetupWizard:
             data["scope"] = oauth_cfg["scope"]
 
         try:
-            resp = httpx.post(oauth_cfg["token_url"], data=data, timeout=10, verify=False)
+            resp = httpx.post(oauth_cfg["token_url"], data=data, timeout=10)
             if resp.status_code == 200:
                 token = resp.json().get("access_token")
                 if token:
