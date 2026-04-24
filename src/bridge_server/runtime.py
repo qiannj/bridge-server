@@ -113,6 +113,8 @@ _PROVIDER_TYPE_MAP = {
     "moonshot": "moonshot",
 }
 
+_OPENAI_CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
+
 def _build_providers_config(config: Dict[str, Any]) -> List[ProviderConfig]:
     """从 config.yaml 的 providers 列表动态构建 ProviderConfig。
 
@@ -137,13 +139,25 @@ def _build_providers_config(config: Dict[str, Any]) -> List[ProviderConfig]:
         auth_type = p.get("auth_type", "api_key")
 
         if auth_type == "oauth":
-            # OAuth providers: enabled if oauth.token_url + client_id + client_secret present
-            oauth_cfg = p.get("oauth") or {}
-            enabled = bool(
-                oauth_cfg.get("token_url")
-                and oauth_cfg.get("client_id")
-                and oauth_cfg.get("client_secret")
-            )
+            oauth_cfg = dict(p.get("oauth") or {})
+            is_codex_oauth = oauth_cfg.get("provider") == "openai_codex"
+            if is_codex_oauth and not oauth_cfg.get("auth_store_key"):
+                oauth_cfg["auth_store_key"] = name
+            resolved_base_url = base_url
+            if is_codex_oauth and (not resolved_base_url or resolved_base_url.rstrip("/") == "https://api.openai.com/v1"):
+                resolved_base_url = str(oauth_cfg.get("base_url") or _OPENAI_CODEX_BASE_URL)
+            if is_codex_oauth:
+                enabled = bool(
+                    oauth_cfg.get("token_url")
+                    and oauth_cfg.get("client_id")
+                    and oauth_cfg.get("auth_store_key")
+                )
+            else:
+                enabled = bool(
+                    oauth_cfg.get("token_url")
+                    and oauth_cfg.get("client_id")
+                    and oauth_cfg.get("client_secret")
+                )
             if not enabled:
                 logger.debug(f"Provider '{name}' OAuth 配置不完整，跳过")
                 continue
@@ -153,7 +167,7 @@ def _build_providers_config(config: Dict[str, Any]) -> List[ProviderConfig]:
                 provider_type=provider_type,
                 config={
                     "id": name,
-                    "base_url": base_url,
+                    "base_url": resolved_base_url,
                     "auth_type": "oauth",
                     "oauth": oauth_cfg,
                     "models": [m.get("id") for m in p.get("models", []) if m.get("id")],
