@@ -22,6 +22,7 @@ from bridge_server.auth import _HASHED_FORMAT_MARKER, _HASHED_FORMAT_VALUE, _has
 GITHUB_REPO = "qiannj/bridge-server"
 GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 CURRENT_VERSION = "2.0.0"
+OPENAI_CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
 
 
 def _get_config_dir() -> Path:
@@ -43,6 +44,22 @@ def _save_yaml(path: Path, data: dict):
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(data, f, allow_unicode=True, default_flow_style=False)
+
+
+def _resolve_provider_base_url(provider: dict) -> str:
+    base_url = str(provider.get("base_url", "") or "")
+    oauth_cfg = provider.get("oauth") or {}
+    if oauth_cfg.get("provider") == "openai_codex":
+        if not base_url or base_url.rstrip("/") == "https://api.openai.com/v1":
+            return str(oauth_cfg.get("base_url") or OPENAI_CODEX_BASE_URL)
+    return base_url
+
+
+def _resolve_oauth_config(provider: dict) -> dict:
+    oauth_cfg = dict(provider.get("oauth") or {})
+    if oauth_cfg.get("provider") == "openai_codex" and not oauth_cfg.get("auth_store_key"):
+        oauth_cfg["auth_store_key"] = provider.get("name") or "openai"
+    return oauth_cfg
 
 
 # ── Panel token management ──────────────────────────────────────────────────
@@ -1520,7 +1537,7 @@ async def start_benchmark(req: BenchmarkStartRequest, background_tasks: Backgrou
     if not provider:
         raise HTTPException(status_code=404, detail=f"Provider '{req.provider_name}' 不存在")
 
-    base_url = provider.get("base_url", "")
+    base_url = _resolve_provider_base_url(provider)
     auth_type = provider.get("auth_type", "api_key")
 
     # Resolve API key / bearer token
@@ -1528,7 +1545,7 @@ async def start_benchmark(req: BenchmarkStartRequest, background_tasks: Backgrou
         api_key = ""
         try:
             from bridge_server.providers.oauth_manager import OAuthManager
-            mgr = OAuthManager(provider.get("oauth", {}))
+            mgr = OAuthManager(_resolve_oauth_config(provider))
             api_key = await mgr.get_token()
         except Exception:
             pass
