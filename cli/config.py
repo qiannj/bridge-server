@@ -10,6 +10,7 @@ CLI 和主服务都通过此模块读取配置，避免不一致
 """
 
 import os
+import socket
 from pathlib import Path
 from typing import Optional
 
@@ -107,14 +108,58 @@ def get_server_url() -> str:
         return env_url.rstrip('/')
     
     # 自动构建
-    host = get_default_host()
+    host = get_display_host()
     port = get_default_port()
-    
-    # localhost 处理（0.0.0.0 → localhost）
-    if host in ('0.0.0.0', '127.0.0.1'):
-        host = 'localhost'
-    
     return f"http://{host}:{port}"
+
+
+def _detect_outbound_ip() -> Optional[str]:
+    """Detect a likely externally reachable IP for display purposes."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))
+            ip = sock.getsockname()[0]
+            if ip and ip not in ("0.0.0.0", "127.0.0.1"):
+                return ip
+    except Exception:
+        pass
+    return None
+
+
+def get_display_host() -> str:
+    """
+    获取给用户展示的访问地址主机名。
+
+    优先级：
+    1. BRIDGE_SERVER_PUBLIC_HOST / BRIDGE_PUBLIC_HOST 环境变量
+    2. config.yaml 中的 server.public_host
+    3. 若监听地址不是 0.0.0.0/127.0.0.1，直接使用该 host
+    4. 自动探测对外 IP
+    5. 回退 localhost
+    """
+    for env_name in ("BRIDGE_SERVER_PUBLIC_HOST", "BRIDGE_PUBLIC_HOST"):
+        value = os.getenv(env_name)
+        if value:
+            return value.strip()
+
+    if CONFIG_FILE.exists():
+        try:
+            config = _load_config_raw()
+            public_host = str(config.get("server", {}).get("public_host", "") or "").strip()
+            if public_host:
+                return public_host
+        except Exception:
+            pass
+
+    host = get_default_host()
+    if host not in ("0.0.0.0", "127.0.0.1", "localhost"):
+        return host
+
+    detected = _detect_outbound_ip()
+    if detected:
+        return detected
+
+    return "localhost"
 
 
 def get_api_base_url() -> str:

@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime
 
-from config import get_default_port
+from config import get_default_port, get_display_host
 
 # 添加 src 到路径
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -1549,7 +1549,7 @@ class SetupWizard:
         
         print(f"{Colors.GREEN}✅ 已生成用户侧 API Key{Colors.ENDC}")
         print(f"\n连接信息：")
-        print(f"  Base URL: http://localhost:{self.config['server']['port']}/v1")
+        print(f"  Base URL: http://{get_display_host()}:{self.config['server']['port']}/v1")
         print(f"  API Key:  {Colors.YELLOW}{api_key}{Colors.ENDC}")
         
         # 保存 auth.yaml
@@ -1630,10 +1630,10 @@ class SetupWizard:
         print(f"{Colors.CYAN}{'='*60}{Colors.ENDC}\n")
         
         print(f"连接信息：")
-        print(f"  Base URL: http://localhost:{self.config['server']['port']}/v1")
+        print(f"  Base URL: http://{get_display_host()}:{self.config['server']['port']}/v1")
         print(f"  API Key:  {self.config['auth']['api_keys'][0]['key']}")
         print(f"\n测试连接：")
-        print(f"  curl http://localhost:{self.config['server']['port']}/health")
+        print(f"  curl http://{get_display_host()}:{self.config['server']['port']}/health")
         print(f"\n管理命令：")
         print(f"  bridge-server start   - 启动服务")
         print(f"  bridge-server stop    - 停止服务")

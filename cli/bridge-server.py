@@ -22,6 +22,7 @@ from config import (
     LOG_FILE,
     USAGE_FILE,
     get_server_url,
+    get_display_host,
     get_default_port,
     get_api_key_from_env,
     is_service_running,
@@ -505,7 +506,7 @@ def cmd_panel_token(reset: bool = False):
     print()
     print(f"{Colors.BOLD}Bridge Server 管理面板{Colors.ENDC}")
     print()
-    print(f"  面板地址：{Colors.CYAN}http://localhost:{port}/ui{Colors.ENDC}")
+    print(f"  面板地址：{Colors.CYAN}http://{get_display_host()}:{port}/ui{Colors.ENDC}")
     print(f"  Panel Token：{Colors.GREEN}{token}{Colors.ENDC}")
     print()
 
