@@ -4,6 +4,37 @@
 
 ---
 
+## [v2.3.0] - 2026-04-25
+
+### 🚀 配置与接入体验升级
+
+- ✅ 配置向导支持动态发现 Codex 可用模型，减少手工输入和静态模型表过期问题。
+- ✅ 修复 setup wizard 在 CLI 虚拟环境中的重型导入链问题，降低初始化失败概率。
+- ✅ CLI 输出补充公网服务地址，便于用户直接复制连接信息到外部客户端。
+- ✅ `config.yaml.example` 补充更多配置示例，覆盖新接入场景。
+
+### 🔐 Codex OAuth 与协议兼容增强
+
+- ✅ OAuth 流程切换到社区通用的 Codex client ID，提升接入兼容性。
+- ✅ 改进 OAuth token 生命周期管理与旧配置迁移逻辑，减少刷新异常和历史配置失效问题。
+- ✅ OpenAI Provider 增强对 Codex Responses 协议的兼容，适配更多上游返回格式。
+- ✅ 新增 OAuth 与 benchmark 相关的管理接口测试，覆盖关键路径。
+
+### 🧠 路由能力与安全加固
+
+- ✅ 新增表达式路由器 `expression_router`，支持更灵活的路由规则扩展。
+- ✅ 新增 `sandbox_runner`，为自定义路由逻辑执行提供隔离运行能力。
+- ✅ 路由注册表和智能路由逻辑继续收口，补强安全边界与扩展能力。
+- ✅ 示例路由器同步更新，便于按成本或规则快速定制。
+
+### 🌐 管理面板与文档更新
+
+- ✅ 新增 `docs/index.html` 项目落地页，统一对外入口。
+- ✅ 管理端与运行时配套更新，支撑 OAuth、模型发现和路由扩展能力。
+- ✅ 补充 `tests/test_setup_wizard.py`、`tests/test_oauth_manager.py` 等回归测试。
+
+---
+
 ## [Unreleased] - QA
 
 ### 🔧 OpenAI 兼容性修复
